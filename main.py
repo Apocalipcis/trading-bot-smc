@@ -87,7 +87,7 @@ Examples:
                        help='Higher timeframe CSV file (e.g., 4h data)')
     
     # Optional arguments
-    parser.add_argument('--rr', type=float, default=2.0,
+    parser.add_argument('--rr', type=float, default=3.0,
                        help='Minimum Risk/Reward ratio (default: 2.0)')
     parser.add_argument('--left', type=int, default=2,
                        help='Fractal left bars (default: 2)')

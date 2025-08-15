@@ -11,7 +11,7 @@ from .smc_detector import (
 )
 
 def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, 
-                    left: int = 2, right: int = 2, rr_min: float = 2.0) -> pd.DataFrame:
+                    left: int = 2, right: int = 2, rr_min: float = 3.0) -> pd.DataFrame:
     """
     Generate trading signals based on SMC methodology
     
