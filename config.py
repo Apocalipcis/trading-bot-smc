@@ -13,7 +13,7 @@ class SMCConfig:
     fractal_right: int = 2
     
     # Risk management
-    min_risk_reward: float = 2.0
+    min_risk_reward: float = 3.0
     max_risk_per_trade: float = 0.02  # 2% of account per trade
     
     # Analysis parameters

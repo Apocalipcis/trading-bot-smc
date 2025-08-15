@@ -47,7 +47,7 @@ venv\Scripts\python.exe main.py --ltf data/btc_15m.csv --htf data/btc_4h.csv
 
 - `--ltf` - Lower timeframe CSV файл (обов'язково)
 - `--htf` - Higher timeframe CSV файл (обов'язково)
-- `--rr` - Мінімальний Risk/Reward ratio (за замовчуванням: 2.0)
+- `--rr` - Мінімальний Risk/Reward ratio (за замовчуванням: 3.0)
 - `--left` - Fractal left bars (за замовчуванням: 2)
 - `--right` - Fractal right bars (за замовчуванням: 2)
 - `--out` - Вихідний файл (за замовчуванням: signals.csv)
