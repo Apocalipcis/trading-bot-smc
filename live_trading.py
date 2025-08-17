@@ -7,6 +7,7 @@ import asyncio
 import argparse
 import sys
 import logging
+import os
 from pathlib import Path
 
 # Add src to path
@@ -32,6 +33,31 @@ def setup_logging(level: str = "INFO", quiet_mode: bool = False):
     logging.getLogger('websockets').setLevel(logging.WARNING)
     logging.getLogger('asyncio').setLevel(logging.WARNING)
     logging.getLogger('aiohttp').setLevel(logging.WARNING)
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Lightweight .env loader (no external deps). Sets os.environ if not set.
+
+    Supports simple lines: KEY=VALUE, ignores comments and empty lines.
+    Strips surrounding single/double quotes from VALUE.
+    """
+    try:
+        if not os.path.exists(path):
+            return
+        with open(path, 'r', encoding='utf-8') as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' not in line:
+                    continue
+                key, val = line.split('=', 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and (key not in os.environ):
+                    os.environ[key] = val
+    except Exception:
+        # Fail silently; env loading is best-effort
+        pass
 
 async def main():
     """Main entry point"""
@@ -74,20 +100,29 @@ Controls (while running):
                        help='Quiet mode - log only to file, not console')
     parser.add_argument('--status-check-interval', type=int, default=45,
                        help='Signal status check interval in seconds (default: 45)')
+    parser.add_argument('--telegram-token', default=None,
+                       help='Telegram bot token for notifications')
+    parser.add_argument('--telegram-chat-id', default=None,
+                       help='Telegram chat ID for notifications')
     
     args = parser.parse_args()
     
     # Setup logging
     setup_logging(args.log_level, quiet_mode=args.quiet)
+    _load_dotenv()
     
     # Configuration
+    token = args.telegram_token or os.getenv('TELEGRAM_TOKEN')
+    chat_id = args.telegram_chat_id or os.getenv('TELEGRAM_CHAT_ID')
     config = {
         'min_risk_reward': args.rr,
         'fractal_left': args.fractal_left,
         'fractal_right': args.fractal_right,
         'desktop_alerts': args.desktop_alerts,
         'sound_alerts': args.sound_alerts,
-        'status_check_interval': args.status_check_interval
+        'status_check_interval': args.status_check_interval,
+        'telegram_token': token,
+        'telegram_chat_id': chat_id
     }
     
     # Validate symbol
@@ -101,6 +136,8 @@ Controls (while running):
         print(f"⚙️  Fractal params: {args.fractal_left}/{args.fractal_right}")
         print(f"🔔 Alerts: Desktop={args.desktop_alerts}, Sound={args.sound_alerts}")
         print(f"⏰ Status check interval: {args.status_check_interval}s")
+        if token and chat_id:
+            print("📨 Telegram notifications enabled")
         print(f"📝 Log level: {args.log_level}")
         print("=" * 60)
         print("Press [Ctrl+C] or [Q] to quit")
