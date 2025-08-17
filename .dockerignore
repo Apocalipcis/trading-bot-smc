@@ -1,0 +1,30 @@
+# VCS
+.git
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual envs
+venv/
+
+# Local env/config
+.env
+.env.*
+
+# Logs and outputs
+*.log
+signals.csv
+signals_history_*.json
+backtest_results.csv
+
+# Large/local data (mount as volume at runtime)
+data/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+
