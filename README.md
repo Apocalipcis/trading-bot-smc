@@ -137,6 +137,7 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alert
 🚨 **Smart Alerts**
 - Desktop повідомлення для нових сигналів
 - Звукові сповіщення (опціонально)
+- Telegram повідомлення
 - Детальна інформація (Entry, SL, TP, RR)
 
 ### Контролі Live Monitor
@@ -160,6 +161,8 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alert
 --sound-alerts           # Увімкнути звукові сповіщення
 --log-level LEVEL        # Рівень логування (INFO/DEBUG)
 --quiet                  # Тихий режим (лог тільки у файл)
+--telegram-token TOKEN   # Telegram bot token для сповіщень
+--telegram-chat-id CHAT  # Telegram chat ID для сповіщень
 ```
 
 ## Порівняння режимів
@@ -178,6 +181,5 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alert
 - Автоматичне розміщення ордерів на біржі
 - Position management та tracking
 - Більш складний risk management
-- Telegram бот інтеграція
 - Web dashboard інтерфейс
 - Backtesting з live даними
