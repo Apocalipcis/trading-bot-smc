@@ -5,3 +5,5 @@ rich>=13.0.0
 textual>=0.45.0
 websockets>=11.0.0
 plyer>=2.1.0
+keyboard>=0.13.5
+pyperclip>=1.8.2

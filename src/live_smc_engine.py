@@ -8,6 +8,9 @@ from typing import Dict, List, Optional, Callable
 import asyncio
 import logging
 
+# Suppress asyncio debug warnings
+logging.getLogger('asyncio').setLevel(logging.WARNING)
+
 from .smc_detector import (
     fractal_pivots, detect_bos_choch, detect_fvg, 
     detect_ob, premium_discount
@@ -368,5 +371,6 @@ class LiveSMCEngine:
             'active_signals': len(self.current_signals),
             'last_analysis': self.last_analysis,
             'ltf_candles': len(self.ltf_data),
-            'htf_candles': len(self.htf_data)
+            'htf_candles': len(self.htf_data),
+            'websocket_connected': self.data_manager.stream.is_connected
         }

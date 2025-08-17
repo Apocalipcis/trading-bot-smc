@@ -9,25 +9,54 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional
 import logging
 
+# Suppress websockets debug output
+logging.getLogger('websockets').setLevel(logging.WARNING)
+
 class BinanceFuturesStream:
     """Real-time data stream for Binance USD-M Futures"""
     
     def __init__(self):
-        self.base_url = "wss://fstream.binance.com/ws/"
+        # Use the correct WebSocket URL for Binance Futures
+        self.base_url = "wss://fstream.binance.com"
         self.connection = None
         self.is_connected = False
         self.callbacks = {}
         self.kline_data = {}  # Store recent klines
+        self.subscribed_streams = []  # Track subscribed streams
         
-    async def connect(self):
-        """Connect to Binance Futures WebSocket"""
+    async def connect(self, streams: List[str] = None, timeout: int = 10):
+        """Connect to Binance Futures WebSocket with optional streams"""
         try:
-            self.connection = await websockets.connect(self.base_url)
+            # Build URL for combined streams if streams provided
+            if streams:
+                streams_param = "/".join(streams)
+                ws_url = f"{self.base_url}/stream?streams={streams_param}"
+                self.subscribed_streams = streams.copy()
+            else:
+                # Connect to base endpoint for manual subscription
+                ws_url = f"{self.base_url}/ws"
+                self.subscribed_streams = []
+                
+            # Use asyncio.wait_for to handle timeout properly
+            self.connection = await asyncio.wait_for(
+                websockets.connect(
+                    ws_url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=10
+                ),
+                timeout=timeout
+            )
             self.is_connected = True
-            logging.info("Connected to Binance Futures WebSocket")
+            logging.info(f"Connected to Binance Futures WebSocket: {ws_url}")
+        except asyncio.TimeoutError:
+            logging.error(f"WebSocket connection timeout after {timeout}s")
+            self.is_connected = False
+            self.connection = None
         except Exception as e:
             logging.error(f"Failed to connect: {e}")
             self.is_connected = False
+            self.connection = None
             
     async def disconnect(self):
         """Disconnect from WebSocket"""
@@ -40,56 +69,107 @@ class BinanceFuturesStream:
         """Add callback for specific stream"""
         self.callbacks[stream_name] = callback
         
-    async def subscribe_klines(self, symbol: str, intervals: List[str]):
+    async def subscribe_klines(self, symbol: str, intervals: List[str], retries: int = 3):
         """
-        Subscribe to kline/candlestick streams
+        Subscribe to kline/candlestick streams using combined stream URL
         
         Args:
             symbol: Trading pair (e.g., 'ethusdt')
             intervals: List of intervals ['15m', '4h']
+            retries: Number of retry attempts
         """
-        if not self.is_connected:
-            await self.connect()
-            
-        # Create stream names
+        # Create stream names for combined subscription
         streams = []
         for interval in intervals:
             stream_name = f"{symbol.lower()}@kline_{interval}"
             streams.append(stream_name)
             
-        # Subscribe to multiple streams
-        subscribe_message = {
-            "method": "SUBSCRIBE",
-            "params": streams,
-            "id": 1
-        }
+        for attempt in range(retries + 1):
+            try:
+                # Connect with combined streams URL
+                await self.connect(streams=streams)
+                
+                if self.is_connected:
+                    logging.info(f"Connected to combined streams: {streams}")
+                    return  # Success
+                else:
+                    raise Exception("Failed to establish connection")
+                    
+            except Exception as e:
+                logging.error(f"Subscribe failed (attempt {attempt + 1}): {e}")
+                self.is_connected = False
+                self.connection = None
+                
+                if attempt < retries:
+                    logging.warning(f"Retrying in 2 seconds...")
+                    await asyncio.sleep(2)
+                else:
+                    raise Exception(f"Failed to subscribe after {retries + 1} attempts")
         
-        await self.connection.send(json.dumps(subscribe_message))
-        logging.info(f"Subscribed to kline streams: {streams}")
-        
-    async def listen(self):
-        """Listen for incoming messages"""
-        if not self.is_connected:
+    async def listen(self, auto_reconnect: bool = True):
+        """Listen for incoming messages with auto-reconnect"""
+        if not self.is_connected or not self.connection:
             raise Exception("Not connected to WebSocket")
             
-        try:
-            async for message in self.connection:
-                data = json.loads(message)
-                await self._handle_message(data)
-        except websockets.exceptions.ConnectionClosed:
-            logging.warning("WebSocket connection closed")
-            self.is_connected = False
-        except Exception as e:
-            logging.error(f"Error in listen loop: {e}")
+        while True:
+            try:
+                async for message in self.connection:
+                    data = json.loads(message)
+                    await self._handle_message(data)
+            except websockets.exceptions.ConnectionClosed:
+                logging.warning("WebSocket connection closed")
+                self.is_connected = False
+                self.connection = None
+                
+                if auto_reconnect:
+                    logging.info("Attempting to reconnect...")
+                    try:
+                        # Reconnect with the same streams
+                        await self.connect(streams=self.subscribed_streams)
+                        if self.is_connected:
+                            logging.info("Reconnected successfully")
+                            continue
+                    except Exception as reconnect_error:
+                        logging.error(f"Reconnection failed: {reconnect_error}")
+                        
+                break
+                
+            except json.JSONDecodeError as e:
+                logging.error(f"Invalid JSON received: {e}")
+                continue
+                
+            except Exception as e:
+                logging.error(f"Error in listen loop: {e}")
+                self.is_connected = False
+                self.connection = None
+                
+                if auto_reconnect:
+                    logging.info("Attempting to reconnect after error...")
+                    await asyncio.sleep(5)
+                    try:
+                        # Reconnect with the same streams
+                        await self.connect(streams=self.subscribed_streams)
+                        if self.is_connected:
+                            continue
+                    except Exception:
+                        pass
+                        
+                break
             
     async def _handle_message(self, data: Dict):
-        """Handle incoming WebSocket message"""
+        """Handle incoming WebSocket message for combined streams"""
+        # Combined stream format: {"stream":"<streamName>","data":<rawPayload>}
         if 'stream' in data and 'data' in data:
             stream = data['stream']
-            kline_data = data['data']
+            stream_data = data['data']
             
             if '@kline_' in stream:
-                await self._handle_kline(stream, kline_data)
+                await self._handle_kline(stream, stream_data)
+            else:
+                logging.debug(f"Unhandled stream type: {stream}")
+        else:
+            # Handle non-stream messages (ping/pong, errors, etc.)
+            logging.debug(f"Non-stream message: {data}")
                 
     async def _handle_kline(self, stream: str, data: Dict):
         """Handle kline/candlestick data"""
@@ -186,22 +266,51 @@ class LiveDataManager:
         
     async def start(self):
         """Start real-time data collection"""
-        # Get historical data first
-        for interval in self.intervals:
-            historical = await self.stream.get_historical_klines(
-                self.symbol, interval, limit=500
-            )
-            key = f"{self.symbol}_{interval}"
-            self.stream.kline_data[key] = historical.to_dict('records')
+        try:
+            # Get historical data first
+            for interval in self.intervals:
+                try:
+                    historical = await self.stream.get_historical_klines(
+                        self.symbol, interval, limit=500
+                    )
+                    key = f"{self.symbol}_{interval}"
+                    self.stream.kline_data[key] = historical.to_dict('records')
+                    logging.info(f"Loaded {len(historical)} historical {interval} candles for {self.symbol}")
+                except Exception as e:
+                    logging.warning(f"Failed to load historical {interval} data: {e}")
+                    # Continue with empty data
+                    key = f"{self.symbol}_{interval}"
+                    self.stream.kline_data[key] = []
+                
+            # Setup callbacks
+            for interval in self.intervals:
+                stream_name = f"{self.symbol.lower()}@kline_{interval}"
+                self.stream.add_callback(stream_name, self._on_new_kline)
+                
+            # Subscribe and listen with error handling
+            try:
+                await self.stream.subscribe_klines(self.symbol, self.intervals)
+                return await self.stream.listen()
+            except Exception as e:
+                logging.error(f"WebSocket error: {e}")
+                # Return a task that keeps running but handles errors
+                return await self._error_recovery_loop()
+                
+        except Exception as e:
+            logging.error(f"Failed to start data collection: {e}")
+            raise
             
-        # Setup callbacks
-        for interval in self.intervals:
-            stream_name = f"{self.symbol.lower()}@kline_{interval}"
-            self.stream.add_callback(stream_name, self._on_new_kline)
-            
-        # Subscribe and listen
-        await self.stream.subscribe_klines(self.symbol, self.intervals)
-        return self.stream.listen()
+    async def _error_recovery_loop(self):
+        """Recovery loop for WebSocket errors"""
+        while True:
+            try:
+                logging.info("Attempting to restart WebSocket connection...")
+                await asyncio.sleep(10)  # Wait before retry
+                await self.stream.subscribe_klines(self.symbol, self.intervals)
+                return await self.stream.listen()
+            except Exception as e:
+                logging.error(f"Recovery attempt failed: {e}")
+                await asyncio.sleep(30)  # Wait longer on failure
         
     async def _on_new_kline(self, kline_data: Dict):
         """Handle new kline data"""

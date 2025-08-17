@@ -117,6 +117,9 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --desktop-alerts --soun
 
 # Дебаг режим
 venv\Scripts\python.exe live_trading.py --symbol ADAUSDT --log-level DEBUG
+
+# Тихий режим (без спаму в консоль)
+venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alerts
 ```
 
 ### Особливості Live Monitor
@@ -156,6 +159,7 @@ venv\Scripts\python.exe live_trading.py --symbol ADAUSDT --log-level DEBUG
 --desktop-alerts         # Увімкнути desktop уведомлення
 --sound-alerts           # Увімкнути звукові сповіщення
 --log-level LEVEL        # Рівень логування (INFO/DEBUG)
+--quiet                  # Тихий режим (лог тільки у файл)
 ```
 
 ## Порівняння режимів

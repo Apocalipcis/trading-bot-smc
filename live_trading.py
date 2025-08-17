@@ -14,16 +14,24 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from src.live_monitor import run_live_monitor
 
-def setup_logging(level: str = "INFO"):
+def setup_logging(level: str = "INFO", quiet_mode: bool = False):
     """Setup logging configuration"""
+    handlers = [logging.FileHandler('live_trading.log')]
+    
+    # In quiet mode, don't log to console during TUI operation
+    if not quiet_mode:
+        handlers.append(logging.StreamHandler(sys.stdout))
+        
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('live_trading.log'),
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=handlers
     )
+    
+    # Suppress noisy loggers
+    logging.getLogger('websockets').setLevel(logging.WARNING)
+    logging.getLogger('asyncio').setLevel(logging.WARNING)
+    logging.getLogger('aiohttp').setLevel(logging.WARNING)
 
 async def main():
     """Main entry point"""
@@ -35,6 +43,7 @@ Examples:
   python live_trading.py --symbol ETHUSDT
   python live_trading.py --symbol BTCUSDT --rr 2.5
   python live_trading.py --symbol ADAUSDT --log-level DEBUG
+  python live_trading.py --symbol ETHUSDT --quiet --desktop-alerts
   
 Controls (while running):
   [T] - Test signal
@@ -61,11 +70,15 @@ Controls (while running):
                        help='Enable desktop notifications')
     parser.add_argument('--sound-alerts', action='store_true',
                        help='Enable sound alerts')
+    parser.add_argument('--quiet', action='store_true',
+                       help='Quiet mode - log only to file, not console')
+    parser.add_argument('--status-check-interval', type=int, default=45,
+                       help='Signal status check interval in seconds (default: 45)')
     
     args = parser.parse_args()
     
     # Setup logging
-    setup_logging(args.log_level)
+    setup_logging(args.log_level, quiet_mode=args.quiet)
     
     # Configuration
     config = {
@@ -73,7 +86,8 @@ Controls (while running):
         'fractal_left': args.fractal_left,
         'fractal_right': args.fractal_right,
         'desktop_alerts': args.desktop_alerts,
-        'sound_alerts': args.sound_alerts
+        'sound_alerts': args.sound_alerts,
+        'status_check_interval': args.status_check_interval
     }
     
     # Validate symbol
@@ -81,14 +95,16 @@ Controls (while running):
     if not symbol.endswith('USDT'):
         print(f"Warning: Symbol {symbol} doesn't end with USDT")
         
-    print(f"🚀 Starting Live SMC Monitor for {symbol}")
-    print(f"📊 Min RR: {args.rr}")
-    print(f"⚙️  Fractal params: {args.fractal_left}/{args.fractal_right}")
-    print(f"🔔 Alerts: Desktop={args.desktop_alerts}, Sound={args.sound_alerts}")
-    print(f"📝 Log level: {args.log_level}")
-    print("=" * 60)
-    print("Press [Ctrl+C] or [Q] to quit")
-    print("=" * 60)
+    if not args.quiet:
+        print(f"🚀 Starting Live SMC Monitor for {symbol}")
+        print(f"📊 Min RR: {args.rr}")
+        print(f"⚙️  Fractal params: {args.fractal_left}/{args.fractal_right}")
+        print(f"🔔 Alerts: Desktop={args.desktop_alerts}, Sound={args.sound_alerts}")
+        print(f"⏰ Status check interval: {args.status_check_interval}s")
+        print(f"📝 Log level: {args.log_level}")
+        print("=" * 60)
+        print("Press [Ctrl+C] or [Q] to quit")
+        print("=" * 60)
     
     try:
         # Run live monitor
