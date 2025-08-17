@@ -112,7 +112,7 @@ venv\Scripts\python.exe live_trading.py
 # З кастомними параметрами
 venv\Scripts\python.exe live_trading.py --symbol BTCUSDT --rr 2.5
 
-# З уведомленнями
+# З повідомленнями
 venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --desktop-alerts --sound-alerts
 
 # Дебаг режим
@@ -135,7 +135,7 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alert
 - Статистика та контроль
 
 🚨 **Smart Alerts**
-- Desktop notifications для нових сигналів
+- Desktop повідомлення для нових сигналів
 - Звукові сповіщення (опціонально)
 - Детальна інформація (Entry, SL, TP, RR)
 
@@ -156,7 +156,7 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alert
 --rr RR                  # Min Risk/Reward (default: 3.0)  
 --fractal-left LEFT      # Fractal left bars (default: 2)
 --fractal-right RIGHT    # Fractal right bars (default: 2)
---desktop-alerts         # Увімкнути desktop уведомлення
+--desktop-alerts         # Увімкнути desktop повідомлення
 --sound-alerts           # Увімкнути звукові сповіщення
 --log-level LEVEL        # Рівень логування (INFO/DEBUG)
 --quiet                  # Тихий режим (лог тільки у файл)
