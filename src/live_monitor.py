@@ -54,6 +54,7 @@ class LiveMonitorTUI:
         # Copy functionality
         self.selected_signal_index = 0  # For copying specific signal data
         self.last_copy_message = ""
+        self.last_info_message = ""
         
         # Signal status checking
         self.status_check_interval = config.get('status_check_interval', 45)  # seconds
@@ -264,9 +265,10 @@ class LiveMonitorTUI:
         controls_text = Text("\n🎛️ Controls:\n", style="bold cyan")
         if keyboard:
             controls_text.append("[T] Test Signal\n", style="white")
+            controls_text.append("[G] Test Telegram\n", style="white")
             controls_text.append("\n📋 Copy (latest signal):\n", style="bold yellow")
             controls_text.append("[C] Entry Price\n", style="white")
-            controls_text.append("[S] SL Price\n", style="white") 
+            controls_text.append("[L] SL Price\n", style="white") 
             controls_text.append("[V] TP Price\n", style="white")
             controls_text.append("[A] All Info\n", style="white")
             controls_text.append("[P] Market Price\n", style="white")
@@ -277,6 +279,9 @@ class LiveMonitorTUI:
             # Show last copy message
             if self.last_copy_message:
                 controls_text.append(f"\n💬 {self.last_copy_message}", style="green")
+            # Show last info/alert message
+            if self.last_info_message:
+                controls_text.append(f"\n🔔 {self.last_info_message}", style="yellow")
                 
             controls_text.append("\nKeyboard: ✅ Active", style="green")
         else:
@@ -415,7 +420,7 @@ class LiveMonitorTUI:
                     self._test_signal()
                 elif keyboard.is_pressed('c'):
                     self._copy_entry_price()
-                elif keyboard.is_pressed('s'):
+                elif keyboard.is_pressed('l'):
                     self._copy_sl_price()
                 elif keyboard.is_pressed('v'):
                     self._copy_tp_price()
@@ -423,6 +428,8 @@ class LiveMonitorTUI:
                     self._copy_all_signal_info()
                 elif keyboard.is_pressed('p'):
                     self._copy_market_price()
+                elif keyboard.is_pressed('g'):
+                    self._test_telegram()
                 elif keyboard.is_pressed('delete'):
                     self.signals.clear()
                     
@@ -447,6 +454,11 @@ class LiveMonitorTUI:
             'confidence': 'high'
         }
         self.signals.append(test_signal)
+        # Trigger notifications to test alerting stack
+        try:
+            self._show_signal_notification(test_signal)
+        except Exception:
+            pass
         
     def _load_signal_history(self):
         """Load signal history from file"""
