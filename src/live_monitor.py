@@ -88,7 +88,7 @@ class LiveMonitorTUI:
         
         # Start UI
         try:
-            with Live(self._create_layout(), refresh_per_second=0.5, console=self.console, screen=True) as live:
+            with Live(self._create_layout(), refresh_per_second=0.2, console=self.console, screen=False) as live:
                 self.live = live
                 self.status = 'running'
                 self.last_update = 0
@@ -107,12 +107,12 @@ class LiveMonitorTUI:
                         status_changed = self._update_signal_statuses()
                         self.last_status_check = current_time
                     
-                    # Update display only if something changed or every 5 seconds
-                    if signals_changed or data_changed or status_changed or (current_time - self.last_update) > 5:
+                    # Update display only if something changed or every 10 seconds
+                    if signals_changed or data_changed or status_changed or (current_time - self.last_update) > 10:
                         live.update(self._create_layout())
                         self.last_update = current_time
                     
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(2.0)
                     
         except KeyboardInterrupt:
             pass
