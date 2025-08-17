@@ -62,7 +62,8 @@ def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame,
         ob_low, ob_high = ob.low, ob.high
         
         # Find candles that touched the OB after it was formed
-        post_ob_data = df_ltf.iloc[ob.end_idx:]
+        # Start searching from the candle *after* the OB candle
+        post_ob_data = df_ltf.iloc[ob.end_idx + 1:]
         if post_ob_data.empty:
             continue
             
@@ -76,7 +77,8 @@ def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame,
             
         # Use last mitigation point
         relative_touch_idx = touch_indices[-1]
-        actual_touch_idx = ob.end_idx + relative_touch_idx
+        # Adjust because post_ob_data starts from ob.end_idx + 1
+        actual_touch_idx = ob.end_idx + 1 + relative_touch_idx
         
         # Step 6: Check for FVG confluence
         fvg_confluence = False

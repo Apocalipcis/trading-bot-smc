@@ -123,6 +123,7 @@ Controls (while running):
         'status_check_interval': args.status_check_interval,
         'telegram_token': token,
         'telegram_chat_id': chat_id
+
     }
     
     # Validate symbol
@@ -137,6 +138,7 @@ Controls (while running):
         print(f"🔔 Alerts: Desktop={args.desktop_alerts}, Sound={args.sound_alerts}")
         print(f"⏰ Status check interval: {args.status_check_interval}s")
         if token and chat_id:
+
             print("📨 Telegram notifications enabled")
         print(f"📝 Log level: {args.log_level}")
         print("=" * 60)

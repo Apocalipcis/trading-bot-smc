@@ -32,3 +32,6 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
         logging.error("Telegram request error: %s", e)
         return False
 
+        return resp.ok
+    except requests.RequestException:
+        return False

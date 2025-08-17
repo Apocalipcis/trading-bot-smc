@@ -385,6 +385,17 @@ class LiveMonitorTUI:
         except Exception as e:
             # Notification might fail on some systems
             pass
+
+        token = self.config.get('telegram_token')
+        chat_id = self.config.get('telegram_chat_id')
+        if token and chat_id:
+            message = (
+                f"SMC Signal - {self.symbol}\n"
+                f"{direction_emoji} {signal['direction']} @ ${signal['entry']:.2f}\n"
+                f"SL: ${signal['sl']:.2f} | TP: ${signal['tp']:.2f}\n"
+                f"RR: {signal['rr']:.1f} | Confidence: {signal.get('confidence', 'medium')}"
+            )
+            send_telegram_message(token, chat_id, message)
             
     def _update_stats(self):
         """Update statistics"""
