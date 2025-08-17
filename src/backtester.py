@@ -9,14 +9,21 @@ from datetime import datetime
 
 @dataclass
 class TradeResult:
-    """Result of a single trade validation"""
+    """Result of a single trade validation.
+
+    Exit reasons:
+        - 'SL': stop-loss hit
+        - 'TP': take-profit hit
+        - 'NO_EXIT': no exit recorded within data range
+        - 'NO_DATA': missing price data for the signal
+    """
     timestamp: str
     direction: str
     entry: float
     sl: float
     tp: float
     exit_price: float
-    exit_reason: str  # 'SL', 'TP', 'NO_EXIT'
+    exit_reason: str  # 'SL', 'TP', 'NO_EXIT', 'NO_DATA'
     exit_time: str
     pnl: float
     duration_minutes: int
