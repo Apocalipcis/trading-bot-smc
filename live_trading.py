@@ -74,6 +74,10 @@ Controls (while running):
                        help='Quiet mode - log only to file, not console')
     parser.add_argument('--status-check-interval', type=int, default=45,
                        help='Signal status check interval in seconds (default: 45)')
+    parser.add_argument('--telegram-token', default=None,
+                       help='Telegram bot token for notifications')
+    parser.add_argument('--telegram-chat-id', default=None,
+                       help='Telegram chat ID for notifications')
     
     args = parser.parse_args()
     
@@ -87,7 +91,9 @@ Controls (while running):
         'fractal_right': args.fractal_right,
         'desktop_alerts': args.desktop_alerts,
         'sound_alerts': args.sound_alerts,
-        'status_check_interval': args.status_check_interval
+        'status_check_interval': args.status_check_interval,
+        'telegram_token': args.telegram_token,
+        'telegram_chat_id': args.telegram_chat_id
     }
     
     # Validate symbol
@@ -101,6 +107,8 @@ Controls (while running):
         print(f"⚙️  Fractal params: {args.fractal_left}/{args.fractal_right}")
         print(f"🔔 Alerts: Desktop={args.desktop_alerts}, Sound={args.sound_alerts}")
         print(f"⏰ Status check interval: {args.status_check_interval}s")
+        if args.telegram_token and args.telegram_chat_id:
+            print("📨 Telegram notifications enabled")
         print(f"📝 Log level: {args.log_level}")
         print("=" * 60)
         print("Press [Ctrl+C] or [Q] to quit")
