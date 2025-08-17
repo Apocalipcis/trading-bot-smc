@@ -265,7 +265,7 @@ class LiveMonitorTUI:
             controls_text.append("[T] Test Signal\n", style="white")
             controls_text.append("\n📋 Copy (latest signal):\n", style="bold yellow")
             controls_text.append("[C] Entry Price\n", style="white")
-            controls_text.append("[S] SL Price\n", style="white") 
+            controls_text.append("[L] SL Price\n", style="white") 
             controls_text.append("[V] TP Price\n", style="white")
             controls_text.append("[A] All Info\n", style="white")
             controls_text.append("[P] Market Price\n", style="white")
@@ -403,7 +403,7 @@ class LiveMonitorTUI:
                     self._test_signal()
                 elif keyboard.is_pressed('c'):
                     self._copy_entry_price()
-                elif keyboard.is_pressed('s'):
+                elif keyboard.is_pressed('l'):
                     self._copy_sl_price()
                 elif keyboard.is_pressed('v'):
                     self._copy_tp_price()
