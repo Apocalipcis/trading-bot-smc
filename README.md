@@ -165,6 +165,61 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --quiet --desktop-alert
 --telegram-chat-id CHAT  # Telegram chat ID для сповіщень
 ```
 
+## Docker
+
+Можна запускати бектест і live‑монітор у контейнерах (multi‑stage `Dockerfile` вже додано).
+
+### Збірка образів
+
+```bash
+# Backtest target
+docker build --target backtest -t smc-bot:backtest .
+
+# Live target
+docker build --target live -t smc-bot:live .
+```
+
+### Запуск Backtest у контейнері
+
+```bash
+# Unix/macOS
+docker run --rm -it \
+  -v "$PWD/data:/app/data" \
+  smc-bot:backtest \
+  python main.py --ltf data/btc_15m.csv --htf data/btc_4h.csv
+
+# Windows (PowerShell)
+docker run --rm -it \
+  -v ${PWD}/data:/app/data \
+  smc-bot:backtest \
+  python main.py --ltf data/btc_15m.csv --htf data/btc_4h.csv
+
+# Windows (cmd)
+docker run --rm -it -v %cd%/data:/app/data smc-bot:backtest ^
+  python main.py --ltf data/btc_15m.csv --htf data/btc_4h.csv
+```
+
+### Запуск Live Monitor у контейнері
+
+```bash
+# Через явні змінні середовища
+docker run --rm -it \
+  -e TELEGRAM_TOKEN=your_token \
+  -e TELEGRAM_CHAT_ID=your_chat_id \
+  smc-bot:live \
+  python live_trading.py --symbol ETHUSDT --desktop-alerts
+
+# Або через .env файл (у корені репо)
+docker run --rm -it --env-file .env \
+  smc-bot:live \
+  python live_trading.py --symbol ETHUSDT
+```
+
+Примітки:
+- Для доступу до локальних CSV змонтуйте каталог `data/` у `/app/data` як показано вище.
+- Desktop‑сповіщення та глобальні гарячі клавіші можуть не працювати всередині контейнера; рекомендуємо Telegram‑сповіщення.
+- Не зберігайте секрети в образі; передавайте їх через змінні середовища або `--env-file`.
+
 ## Порівняння режимів
 
 | Режим | Дані | Виконання | Використання |
