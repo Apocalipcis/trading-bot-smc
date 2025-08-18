@@ -173,11 +173,25 @@ async def toggle_pair_enabled(symbol: str, enabled: bool = Form(...)):
             await bot_state.pair_manager.apply_config(bot_state.config)
         
         logger.info(f"Toggled {symbol} enabled: {enabled}")
-        return {"success": True, "symbol": symbol, "enabled": enabled}
+        
+        # Return HTML fragment instead of JSON for HTMX
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> {symbol} trading {'enabled' if enabled else 'disabled'}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
         
     except Exception as e:
         logger.error(f"Error toggling {symbol} enabled: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to toggle {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 @app.post("/api/pairs/{symbol}/toggle-backtest")
@@ -201,11 +215,25 @@ async def toggle_pair_backtest(symbol: str, backtest_enabled: bool = Form(...)):
             await bot_state.pair_manager.apply_config(bot_state.config)
         
         logger.info(f"Toggled {symbol} backtest: {backtest_enabled}")
-        return {"success": True, "symbol": symbol, "backtest_enabled": backtest_enabled}
+        
+        # Return HTML fragment instead of JSON for HTMX
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> {symbol} backtest {'enabled' if backtest_enabled else 'disabled'}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
         
     except Exception as e:
         logger.error(f"Error toggling {symbol} backtest: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to toggle {symbol} backtest: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 @app.post("/api/pairs/add")

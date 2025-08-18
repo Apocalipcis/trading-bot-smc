@@ -497,7 +497,18 @@
                 setTimeout(() => {
                     evt.target.innerHTML = '';
                 }, 5000);
+                
+                // Refresh pairs table to show updated states
+                if (evt.detail.xhr.responseText.includes('Success')) {
+                    // Trigger pairs table refresh
+                    htmx.trigger('#pairs-table', 'refresh');
+                }
             }
+        });
+        
+        // Add refresh event listener for pairs table
+        document.addEventListener('refresh', function() {
+            htmx.trigger('#pairs-table', 'refresh');
         });
     </script>
 </body>

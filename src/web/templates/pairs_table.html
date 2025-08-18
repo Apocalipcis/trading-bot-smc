@@ -31,8 +31,8 @@
                                {% if is_running %}disabled{% endif %}
                                hx-post="/api/pairs/{{ pair.symbol }}/toggle-enabled"
                                hx-vals='{"enabled": {% if pair.enabled %}false{% else %}true{% endif %}}'
-                               hx-target="#pairs-table"
-                               hx-swap="outerHTML">
+                               hx-target="#status-alert"
+                               hx-swap="innerHTML">
                         <span class="slider"></span>
                     </label>
                     {% if pair.enabled %}
@@ -49,8 +49,8 @@
                                {% if pair.backtest_enabled %}checked{% endif %}
                                hx-post="/api/pairs/{{ pair.symbol }}/toggle-backtest"
                                hx-vals='{"backtest_enabled": {% if pair.backtest_enabled %}false{% else %}true{% endif %}}'
-                               hx-target="#pairs-table"
-                               hx-swap="outerHTML">
+                               hx-target="#status-alert"
+                               hx-swap="innerHTML">
                         <span class="slider"></span>
                     </label>
                     {% if pair.backtest_enabled %}
