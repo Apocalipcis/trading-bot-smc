@@ -104,6 +104,9 @@ class SMCStrategy(Strategy):
             })
         
         df = pd.DataFrame(data)
+        
+        # Ensure timestamp column is properly formatted as pandas datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
         df.set_index('timestamp', inplace=True)
         
         # Ensure all numeric columns are float64
@@ -257,7 +260,7 @@ class SMCStrategy(Strategy):
             
             # Create signal
             signal = Signal(
-                timestamp=datetime.now(),
+                timestamp=datetime.now().isoformat(),
                 symbol=self.symbol,
                 direction=direction,
                 entry=float(entry_price),

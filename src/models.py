@@ -35,7 +35,7 @@ class FVG:
 @dataclass
 class Signal:
     """Trading signal structure"""
-    timestamp: str
+    timestamp: str  # ISO format string
     direction: str  # 'LONG' or 'SHORT'
     entry: float
     sl: float
