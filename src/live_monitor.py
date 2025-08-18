@@ -29,15 +29,16 @@ except ImportError:
 from plyer import notification
 
 from .live_smc_engine import LiveSMCEngine
-from .telegram import send_telegram_message
+from .telegram_client import TelegramClient
 
 class LiveMonitorTUI:
     """Terminal User Interface for Live SMC Monitor"""
     
-    def __init__(self, symbol: str, config: Dict):
+    def __init__(self, symbol: str, config: Dict, telegram_client: Optional[TelegramClient] = None):
         self.symbol = symbol.upper()
         self.config = config
         self.console = Console()
+        self.telegram_client = telegram_client
         
         # State
         self.signals = []  # All historical signals
@@ -371,10 +372,11 @@ class LiveMonitorTUI:
         return changed
             
     def _show_signal_notification(self, signal: Dict):
-        """Show desktop notification for new signal"""
+        """Show desktop notification and send Telegram message for new signal"""
         try:
             direction_emoji = "📈" if signal['direction'] == 'LONG' else "📉"
             
+            # Desktop notification
             notification.notify(
                 title=f"🚨 SMC Signal - {self.symbol}",
                 message=f"{direction_emoji} {signal['direction']} @ ${signal['entry']:.2f}\n"
@@ -385,6 +387,16 @@ class LiveMonitorTUI:
         except Exception as e:
             # Notification might fail on some systems
             pass
+        
+        # Telegram notification
+        if self.telegram_client:
+            try:
+                signal_with_symbol = signal.copy()
+                signal_with_symbol['symbol'] = self.symbol
+                self.telegram_client.send_signal_notification(signal_with_symbol)
+            except Exception as e:
+                # Telegram might fail, log but don't crash
+                print(f"Failed to send Telegram notification: {e}")
 
         token = self.config.get('telegram_token')
         chat_id = self.config.get('telegram_chat_id')
@@ -459,6 +471,26 @@ class LiveMonitorTUI:
             self._show_signal_notification(test_signal)
         except Exception:
             pass
+    
+    def _test_telegram(self):
+        """Test Telegram notification without creating signal"""
+        if self.telegram_client:
+            try:
+                test_message = f"🧪 Test message from SMC Bot\n\n" \
+                              f"📍 Symbol: {self.symbol}\n" \
+                              f"💰 Current Price: ${self.current_price:,.2f}\n" \
+                              f"📊 HTF Bias: {self.htf_bias.upper()}\n" \
+                              f"🕐 Time: {datetime.now().strftime('%H:%M:%S')}\n\n" \
+                              f"✅ Bot is working correctly!"
+                
+                if self.telegram_client.send_message(test_message):
+                    self.last_info_message = "📱 Telegram test message sent!"
+                else:
+                    self.last_info_message = "❌ Failed to send Telegram test"
+            except Exception as e:
+                self.last_info_message = f"❌ Telegram error: {str(e)[:50]}"
+        else:
+            self.last_info_message = "❌ Telegram not configured"
         
     def _load_signal_history(self):
         """Load signal history from file"""
@@ -661,7 +693,7 @@ class LiveMonitorTUI:
                 
         return changed
         
-async def run_live_monitor(symbol: str, config: Dict):
+async def run_live_monitor(symbol: str, config: Dict, telegram_client: Optional[TelegramClient] = None):
     """Run the live monitor"""
-    monitor = LiveMonitorTUI(symbol, config)
+    monitor = LiveMonitorTUI(symbol, config, telegram_client)
     await monitor.start()

@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent / "src"))
 
 from src.live_monitor import run_live_monitor
+from src.telegram_client import TelegramClient
 
 def setup_logging(level: str = "INFO", quiet_mode: bool = False):
     """Setup logging configuration"""
@@ -112,7 +113,7 @@ Controls (while running):
     _load_dotenv()
     
     # Configuration
-    token = args.telegram_token or os.getenv('TELEGRAM_TOKEN')
+    token = args.telegram_token or os.getenv('TELEGRAM_BOT_TOKEN')
     chat_id = args.telegram_chat_id or os.getenv('TELEGRAM_CHAT_ID')
     config = {
         'min_risk_reward': args.rr,
@@ -123,7 +124,6 @@ Controls (while running):
         'status_check_interval': args.status_check_interval,
         'telegram_token': token,
         'telegram_chat_id': chat_id
-
     }
     
     # Validate symbol
@@ -146,8 +146,22 @@ Controls (while running):
         print("=" * 60)
     
     try:
+        # Create Telegram client if configured
+        telegram_client = None
+        if token and chat_id:
+            telegram_client = TelegramClient(token, chat_id)
+            # Test connection
+            if telegram_client.test_connection():
+                if not args.quiet:
+                    print("✅ Telegram bot connected successfully")
+                # Send startup message
+                telegram_client.send_status_update(f"🚀 SMC Bot started for {symbol}")
+            else:
+                print("❌ Failed to connect to Telegram bot")
+                telegram_client = None
+        
         # Run live monitor
-        await run_live_monitor(symbol, config)
+        await run_live_monitor(symbol, config, telegram_client)
         
     except KeyboardInterrupt:
         print("\n👋 Live monitor stopped by user")
