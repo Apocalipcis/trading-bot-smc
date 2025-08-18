@@ -69,7 +69,22 @@ def stop_services():
 
 def view_logs():
     """View container logs"""
-    return run_command("docker-compose logs -f smc-trading-bot", "Viewing logs")
+    print("\n📋 Available services:")
+    print("1. smc-trading-bot (Console/CLI)")
+    print("2. smc-web (Web Interface)")
+    print("3. All services")
+    
+    choice = input("Choose service to view logs (1-3): ").strip()
+    
+    if choice == "1":
+        return run_command("docker-compose logs -f smc-trading-bot", "Viewing trading bot logs")
+    elif choice == "2":
+        return run_command("docker-compose logs -f smc-web", "Viewing web interface logs")
+    elif choice == "3":
+        return run_command("docker-compose logs -f", "Viewing all logs")
+    else:
+        print("❌ Invalid choice!")
+        return False
 
 def run_backtest(symbol, days=30):
     """Run backtest for specific symbol in container"""

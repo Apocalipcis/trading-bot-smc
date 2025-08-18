@@ -26,16 +26,21 @@ if errorlevel 1 (
 echo.
 echo ✅ Services started successfully!
 echo.
-echo 🌐 Web Interface: http://localhost:8000
-echo 📊 WebSocket: ws://localhost:8001
+echo 🚀 Services running:
+echo   🌐 Web Interface: http://localhost:8000 (smc-web)
+echo   📊 WebSocket: ws://localhost:8001 (smc-trading-bot)
 echo.
 echo 📋 Available commands:
-echo   docker-compose logs -f smc-trading-bot    - View logs
-echo   docker-compose down                       - Stop services
+echo   docker-compose logs -f smc-trading-bot    - View trading bot logs
+echo   docker-compose logs -f smc-web            - View web interface logs
+echo   docker-compose down                       - Stop all services
 echo   python docker-run.py                      - Interactive menu
 echo.
 echo 🎯 Quick start:
 echo   python docker-run.py --backtest ETHUSDT  - Run backtest
 echo   python docker-run.py --live ETHUSDT      - Start live trading
+echo.
+echo 🔍 Check status:
+echo   docker-compose ps                         - View all containers
 echo.
 pause
