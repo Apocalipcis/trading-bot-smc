@@ -58,6 +58,26 @@ body {
     51%, 100% { opacity: 0.3; }
 }
 
+/* Table Row Animations */
+.pair-row {
+    transition: all 0.3s ease;
+}
+
+.pair-row.removing {
+    opacity: 0;
+    transform: translateX(-100%);
+}
+
+.pair-row.adding {
+    opacity: 0;
+    transform: translateX(100%);
+}
+
+.pair-row.adding.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
 /* Custom Toggle Switches */
 .toggle-switch {
     position: relative;

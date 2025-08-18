@@ -6,8 +6,9 @@ import pandas as pd
 import sys
 import os
 
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Add root directory to path
+root_dir = os.path.join(os.path.dirname(__file__), '..')
+sys.path.insert(0, root_dir)
 
 def test_strategy_timestamp_handling():
     """Test strategy timestamp handling"""
@@ -15,7 +16,7 @@ def test_strategy_timestamp_handling():
     
     try:
         # Test the _candles_to_dataframe function
-        from core.strategy import SMCStrategy
+        from src.core.strategy import SMCStrategy
         
         # Create mock candles data
         candles_data = []

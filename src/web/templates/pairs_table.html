@@ -10,7 +10,7 @@
                 <th>Price</th>
                 <th>Bias</th>
                 <th>Signals</th>
-                <th>Actions</th>
+                <th>Actions <small class="text-muted">(⚡=Test, 📊=Run, 🔄=Toggle)</small></th>
             </tr>
         </thead>
         <tbody>
@@ -42,21 +42,18 @@
                     {% endif %}
                 </td>
                 
-                <!-- Backtest Toggle -->
+                <!-- Backtest Status -->
                 <td>
-                    <label class="toggle-switch">
-                        <input type="checkbox" 
-                               {% if pair.backtest_enabled %}checked{% endif %}
-                               hx-post="/api/pairs/{{ pair.symbol }}/toggle-backtest"
-                               hx-vals='{"backtest_enabled": {% if pair.backtest_enabled %}false{% else %}true{% endif %}}'
-                               hx-target="#status-alert"
-                               hx-swap="innerHTML">
-                        <span class="slider"></span>
-                    </label>
-                    {% if pair.backtest_enabled %}
-                        <small class="text-info d-block">Active</small>
+                    {% if status and status.backtest_running %}
+                        <span class="badge bg-warning">
+                            <i class="bi bi-graph-up"></i> Running
+                        </span>
+                    {% elif pair.backtest_enabled %}
+                        <span class="badge bg-info">
+                            <i class="bi bi-graph-up"></i> Enabled
+                        </span>
                     {% else %}
-                        <small class="text-muted d-block">Inactive</small>
+                        <span class="text-muted">Disabled</span>
                     {% endif %}
                 </td>
                 
@@ -112,7 +109,7 @@
                 <td>
                     {% if status and status.active_signals > 0 %}
                         <span class="badge bg-primary">{{ status.active_signals }}</span>
-                        {% if status.last_signal_time %}
+                        {% if status.last_signal_time and status.last_signal_time is string %}
                             <br><small class="text-muted">{{ status.last_signal_time[:16] }}</small>
                         {% endif %}
                     {% else %}
@@ -123,12 +120,41 @@
                 <!-- Actions -->
                 <td>
                     <div class="btn-group btn-group-sm">
+                        <!-- Test Signal button -->
+                        <button class="btn btn-outline-info btn-sm" 
+                                hx-post="/api/pairs/{{ pair.symbol }}/test-signal"
+                                hx-target="#status-alert"
+                                hx-swap="innerHTML"
+                                hx-indicator="#test-signal-spinner-{{ pair.symbol }}"
+                                title="Generate test signal">
+                            <span id="test-signal-spinner-{{ pair.symbol }}" class="spinner-border spinner-border-sm d-none me-1"></span>
+                            <i class="bi bi-lightning"></i>
+                        </button>
+                        
+                        <!-- Run Backtest button -->
+                        <button class="btn btn-outline-success btn-sm" 
+                                hx-post="/api/pairs/{{ pair.symbol }}/run-backtest"
+                                hx-target="#status-alert"
+                                hx-swap="innerHTML"
+                                hx-indicator="#backtest-spinner-{{ pair.symbol }}"
+                                {% if status and status.backtest_running %}disabled{% endif %}
+                                title="Run backtest for {{ pair.symbol }}">
+                            <span id="backtest-spinner-{{ pair.symbol }}" class="spinner-border spinner-border-sm d-none me-1"></span>
+                            <i class="bi bi-graph-up"></i>
+                        </button>
+                        
+                        <!-- Toggle Backtest Status button -->
+                        <button class="btn btn-{{ 'success' if pair.backtest_enabled else 'secondary' }} btn-sm" 
+                                hx-post="/api/pairs/{{ pair.symbol }}/toggle-backtest-status"
+                                hx-target="#status-alert"
+                                hx-swap="innerHTML"
+                                title="{{ 'Disable' if pair.backtest_enabled else 'Enable' }} backtest for {{ pair.symbol }}">
+                            <i class="bi bi-toggle-{{ 'on' if pair.backtest_enabled else 'off' }}"></i>
+                        </button>
+                        
                         <!-- Remove button -->
                         <button class="btn btn-outline-danger btn-sm" 
-                                hx-delete="/api/pairs/{{ pair.symbol }}"
-                                hx-target="#pairs-table"
-                                hx-swap="outerHTML"
-                                hx-confirm="Are you sure you want to remove {{ pair.symbol }}?"
+                                onclick="removePairWithConfirmation('{{ pair.symbol }}')"
                                 title="Remove pair">
                             <i class="bi bi-trash"></i>
                         </button>
@@ -173,3 +199,94 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+// Enhanced UI management for pairs table
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-hide alerts after 5 seconds
+    const alerts = document.querySelectorAll('.alert');
+    alerts.forEach(alert => {
+        setTimeout(() => {
+            if (alert && alert.parentNode) {
+                alert.style.transition = 'opacity 0.5s ease';
+                alert.style.opacity = '0';
+                setTimeout(() => alert.remove(), 500);
+            }
+        }, 5000);
+    });
+    
+    // Add smooth transitions for new rows
+    const newRows = document.querySelectorAll('.pair-row');
+    newRows.forEach(row => {
+        row.classList.add('adding');
+        setTimeout(() => row.classList.add('show'), 100);
+    });
+});
+
+// Function to refresh pairs table
+function refreshPairsTable() {
+    htmx.ajax('GET', '/pairs-table', {
+        target: '#pairs-table',
+        swap: 'outerHTML'
+    });
+}
+
+// Function to remove pair row with animation
+function removePairRow(symbol) {
+    const row = document.querySelector(`tr[data-symbol="${symbol}"]`);
+    if (row) {
+        row.classList.add('removing');
+        setTimeout(() => {
+            row.remove();
+            // Check if table is empty and show message
+            const tbody = document.querySelector('tbody');
+            if (tbody.children.length === 0) {
+                location.reload();
+            }
+        }, 300);
+    }
+}
+
+// Function to remove pair with confirmation and API call
+async function removePairWithConfirmation(symbol) {
+    if (confirm(`Are you sure you want to remove ${symbol}?`)) {
+        try {
+            const response = await fetch(`/api/pairs/${symbol}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                // Show success message
+                const statusAlert = document.getElementById('status-alert');
+                if (statusAlert) {
+                    statusAlert.innerHTML = `
+                        <div class="alert alert-success alert-dismissible fade show" role="alert">
+                            <i class="bi bi-check-circle"></i>
+                            <strong>Success!</strong> Removed pair ${symbol}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `;
+                }
+                
+                // Remove row with animation
+                removePairRow(symbol);
+            } else {
+                throw new Error('Failed to remove pair');
+            }
+        } catch (error) {
+            console.error('Error removing pair:', error);
+            // Show error message
+            const statusAlert = document.getElementById('status-alert');
+            if (statusAlert) {
+                statusAlert.innerHTML = `
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Error!</strong> Failed to remove pair ${symbol}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+            }
+        }
+    }
+}
+</script>

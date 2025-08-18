@@ -237,6 +237,12 @@
                                 <h3 class="mb-0">{{ signals|length }}</h3>
                             </div>
                         </div>
+                        <button class="btn btn-sm btn-outline-warning position-absolute top-0 end-0 m-2" 
+                                hx-get="/signals-list" 
+                                hx-target="#signals-list"
+                                title="Refresh signals">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -283,11 +289,17 @@
             <!-- Signals Panel -->
             <div class="col-lg-4">
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">
                             <i class="bi bi-lightning"></i>
                             Recent Signals
                         </h5>
+                        <button class="btn btn-sm btn-outline-primary" 
+                                hx-get="/signals-list" 
+                                hx-target="#signals-list"
+                                title="Refresh signals">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
                     </div>
                     <div class="card-body p-0" style="max-height: 600px; overflow-y: auto;">
                         <!-- Signals List (HTMX updates) -->
@@ -458,7 +470,7 @@
                     <h5 class="modal-title">Add New Trading Pair</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form hx-post="/api/pairs/add" hx-target="#status-alert" hx-on::after-request="document.getElementById('addPairModal').style.display='none'">
+                <form id="addPairForm" onsubmit="addPairWithForm(event)">
                     <div class="modal-body">
                         <div class="mb-3">
                             <label for="symbol" class="form-label">Symbol</label>
@@ -543,6 +555,73 @@
         document.addEventListener('refresh', function() {
             htmx.trigger('#pairs-table', 'refresh');
         });
+        
+        // Function to add pair with form submission
+        async function addPairWithForm(event) {
+            event.preventDefault();
+            
+            const form = event.target;
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/api/pairs/add', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    // Show success message
+                    const statusAlert = document.getElementById('status-alert');
+                    if (statusAlert) {
+                        statusAlert.innerHTML = `
+                            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                                <i class="bi bi-check-circle"></i>
+                                <strong>Success!</strong> Added new pair ${result.symbol}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        `;
+                    }
+                    
+                    // Close modal
+                    const modal = document.getElementById('addPairModal');
+                    if (modal) {
+                        const bootstrapModal = bootstrap.Modal.getInstance(modal);
+                        if (bootstrapModal) {
+                            bootstrapModal.hide();
+                        }
+                    }
+                    
+                    // Reset form
+                    form.reset();
+                    
+                    // Refresh pairs table
+                    setTimeout(() => {
+                        htmx.ajax('GET', '/pairs-table', {
+                            target: '#pairs-table',
+                            swap: 'outerHTML'
+                        });
+                    }, 500);
+                    
+                } else {
+                    throw new Error('Failed to add pair');
+                }
+            } catch (error) {
+                console.error('Error adding pair:', error);
+                // Show error message
+                const statusAlert = document.getElementById('status-alert');
+                if (statusAlert) {
+                    statusAlert.innerHTML = `
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <strong>Error!</strong> Failed to add pair
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `;
+                }
+            }
+        }
     </script>
 </body>
 </html>

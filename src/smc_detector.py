@@ -129,8 +129,8 @@ def detect_ob(df: pd.DataFrame, bos_events: List[Tuple[int, str]]) -> List[OB]:
                 ob_candle = bearish_candles.iloc[-1]
                 obs.append(OB(
                     kind='bull',
-                    start_idx=int(ob_candle.name),
-                    end_idx=int(ob_candle.name),
+                    start_idx=ob_candle.name,
+                    end_idx=ob_candle.name,
                     open=float(ob_candle['open']),
                     high=float(ob_candle['high']),
                     low=float(ob_candle['low']),
@@ -148,8 +148,8 @@ def detect_ob(df: pd.DataFrame, bos_events: List[Tuple[int, str]]) -> List[OB]:
                 ob_candle = bullish_candles.iloc[-1]
                 obs.append(OB(
                     kind='bear',
-                    start_idx=int(ob_candle.name),
-                    end_idx=int(ob_candle.name),
+                    start_idx=ob_candle.name,
+                    end_idx=ob_candle.name,
                     open=float(ob_candle['open']),
                     high=float(ob_candle['high']),
                     low=float(ob_candle['low']),
