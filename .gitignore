@@ -38,9 +38,12 @@ ENV/
 signals.csv
 backtest_results.csv
 *.log
+backtest_results/
+signals_history/
+signals_history_*.json
 
 # Test data (optional - uncomment if you don't want to track test data)
-# data/
+data/
 
 # IDE
 .vscode/

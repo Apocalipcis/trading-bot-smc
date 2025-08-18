@@ -1,0 +1,79 @@
+<!-- Recent Signals List -->
+{% if signals %}
+    {% for signal in signals %}
+    <div class="signal-item {{ 'signal-long' if signal.direction == 'LONG' else 'signal-short' }} p-3 mb-2 border-bottom">
+        <div class="d-flex justify-content-between align-items-start">
+            <div class="flex-grow-1">
+                <div class="d-flex align-items-center mb-2">
+                    <strong class="me-2">{{ signal.symbol }}</strong>
+                    <span class="badge bg-{{ 'success' if signal.direction == 'LONG' else 'danger' }}">
+                        {% if signal.direction == 'LONG' %}
+                            <i class="bi bi-arrow-up"></i> LONG
+                        {% else %}
+                            <i class="bi bi-arrow-down"></i> SHORT
+                        {% endif %}
+                    </span>
+                    <span class="badge bg-{{ 'success' if signal.confidence == 'high' else 'warning' if signal.confidence == 'medium' else 'secondary' }} ms-2">
+                        {{ signal.confidence.title() }}
+                    </span>
+                </div>
+                
+                <div class="row text-sm">
+                    <div class="col-6">
+                        <small class="text-muted">Entry:</small>
+                        <div><strong>${{ "%.4f"|format(signal.entry) }}</strong></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">R/R:</small>
+                        <div><strong>{{ "%.1f"|format(signal.rr) }}</strong></div>
+                    </div>
+                </div>
+                
+                <div class="row text-sm mt-2">
+                    <div class="col-6">
+                        <small class="text-muted">SL:</small>
+                        <div class="text-danger">${{ "%.4f"|format(signal.sl) }}</div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">TP:</small>
+                        <div class="text-success">${{ "%.4f"|format(signal.tp) }}</div>
+                    </div>
+                </div>
+                
+                <div class="mt-2">
+                    <small class="text-muted">
+                        <i class="bi bi-clock"></i>
+                        {{ signal.timestamp[:16] }}
+                        {% if signal.fvg_confluence %}
+                            • <i class="bi bi-check-circle text-success"></i> FVG
+                        {% endif %}
+                        • <span class="badge bg-secondary">{{ signal.htf_bias.title() }}</span>
+                    </small>
+                </div>
+            </div>
+            
+            <div class="ms-2">
+                <button class="btn btn-sm btn-outline-primary" title="Signal details">
+                    <i class="bi bi-eye"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-lightning fs-1 d-block mb-2"></i>
+        <p class="mb-0">No signals yet</p>
+        <small>Signals will appear here when generated</small>
+    </div>
+{% endif %}
+
+{% if signals|length > 0 %}
+<div class="p-3 border-top bg-light">
+    <small class="text-muted">
+        <i class="bi bi-info-circle"></i>
+        Showing {{ signals|length }} recent signals
+        • Auto-refresh every 3s
+    </small>
+</div>
+{% endif %}
