@@ -1,4 +1,0 @@
-timestamp,symbol,total_trades,win_rate,profit_factor,total_pnl,risk_level,recommendation
-2025-08-18_19-36-05,BTCUSDT,20,5.0,0.0615080434839522,-12941.14999999998,HIGH,"POOR - Strategy underperforming, avoid trading"
-2025-08-18_19-37-32,BTCUSDT,20,5.0,0.0615080434839522,-12941.14999999998,HIGH,"POOR - Strategy underperforming, avoid trading"
-2025-08-18_20-03-59,BTCUSDT,108,37.03703703703704,1.6730191241533652,467.21999999991385,HIGH,"POOR - Strategy underperforming, avoid trading"

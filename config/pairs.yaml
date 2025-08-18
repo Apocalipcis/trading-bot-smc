@@ -9,7 +9,7 @@ logs_dir: logs
 backtest_results_dir: backtest_results
 pairs:
 - symbol: BTCUSDT
-  enabled: true
+  enabled: false
   backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
@@ -18,8 +18,8 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: ETHUSDT
-  enabled: true
-  backtest_enabled: true
+  enabled: false
+  backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
   min_risk_reward: 3.0
@@ -28,7 +28,7 @@ pairs:
   max_risk_per_trade: 0.02
 - symbol: SOLUSDT
   enabled: false
-  backtest_enabled: true
+  backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
   min_risk_reward: 3.0
@@ -36,8 +36,17 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: BNBUSDT
-  enabled: false
-  backtest_enabled: false
+  enabled: true
+  backtest_enabled: true
+  timeframe: 15m
+  strategy: smc_v1
+  min_risk_reward: 3.0
+  fractal_left: 2
+  fractal_right: 2
+  max_risk_per_trade: 0.02
+- symbol: ADAUSDT
+  enabled: true
+  backtest_enabled: true
   timeframe: 15m
   strategy: smc_v1
   min_risk_reward: 3.0
