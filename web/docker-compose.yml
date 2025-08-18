@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  smc-web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ../data:/app/data
+      - signals_history:/app/signals_history
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  signals_history:

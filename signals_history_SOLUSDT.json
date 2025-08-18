@@ -1,0 +1,93 @@
+[
+  {
+    "timestamp": "2025-08-18T16:56:21.788026",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 180.83,
+    "sl": 180.43,
+    "tp": 182.03000000000003,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 488,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T16:56:33.122103",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 181.06,
+    "sl": 180.43,
+    "tp": 182.95,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 488,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T16:57:29.259021",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 181.29,
+    "sl": 180.43,
+    "tp": 183.86999999999995,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 488,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T16:59:46.821908",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 180.64,
+    "sl": 180.43,
+    "tp": 181.26999999999992,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 488,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T16:59:59.144102",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 180.43,
+    "sl": 180.41,
+    "tp": 180.49000000000004,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 488,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T17:18:27.499184",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 181.55,
+    "sl": 180.43,
+    "tp": 184.91000000000003,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 486,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T17:25:58.828267",
+    "symbol": "SOLUSDT",
+    "direction": "LONG",
+    "entry": 181.55,
+    "sl": 180.43,
+    "tp": 184.91000000000003,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 486,
+    "confidence": "medium"
+  }
+]

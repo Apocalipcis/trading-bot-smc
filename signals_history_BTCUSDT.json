@@ -1,0 +1,41 @@
+[
+  {
+    "timestamp": "2025-08-18T17:00:05.473839",
+    "symbol": "BTCUSDT",
+    "direction": "LONG",
+    "entry": 114790.8,
+    "sl": 114769.2,
+    "tp": 114855.60000000002,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 490,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T17:08:20.627945",
+    "symbol": "BTCUSDT",
+    "direction": "LONG",
+    "entry": 115020.0,
+    "sl": 114790.8,
+    "tp": 115707.59999999999,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 490,
+    "confidence": "medium"
+  },
+  {
+    "timestamp": "2025-08-18T17:09:17.341772",
+    "symbol": "BTCUSDT",
+    "direction": "LONG",
+    "entry": 114900.4,
+    "sl": 114790.8,
+    "tp": 115229.19999999997,
+    "rr": 3.0,
+    "htf_bias": "bull",
+    "fvg_confluence": true,
+    "ob_idx": 490,
+    "confidence": "medium"
+  }
+]
