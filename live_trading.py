@@ -105,6 +105,12 @@ Controls (while running):
                        help='Telegram bot token for notifications')
     parser.add_argument('--telegram-chat-id', default=None,
                        help='Telegram chat ID for notifications')
+    parser.add_argument('--run-backtest', action='store_true',
+                       help='Run backtest before starting live trading')
+    parser.add_argument('--backtest-days', type=int, default=30,
+                       help='Number of days for backtest (default: 30)')
+    parser.add_argument('--skip-backtest-prompt', action='store_true',
+                       help='Skip confirmation prompt after backtest')
     
     args = parser.parse_args()
     
@@ -123,7 +129,8 @@ Controls (while running):
         'sound_alerts': args.sound_alerts,
         'status_check_interval': args.status_check_interval,
         'telegram_token': token,
-        'telegram_chat_id': chat_id
+        'telegram_chat_id': chat_id,
+        'backtest_days': args.backtest_days
     }
     
     # Validate symbol
@@ -141,11 +148,16 @@ Controls (while running):
 
             print("📨 Telegram notifications enabled")
         print(f"📝 Log level: {args.log_level}")
+        if args.run_backtest:
+            print(f"🔍 Backtest: {args.backtest_days} days")
         print("=" * 60)
         print("Press [Ctrl+C] or [Q] to quit")
         print("=" * 60)
     
     try:
+        # Run backtest if requested
+        if args.run_backtest:
+            await run_pre_trade_backtest(symbol, config, args.quiet, args.skip_backtest_prompt)
         # Create Telegram client if configured
         telegram_client = None
         if token and chat_id:
@@ -171,6 +183,92 @@ Controls (while running):
         return 1
         
     return 0
+
+async def run_pre_trade_backtest(symbol: str, config: dict, quiet: bool = False, skip_prompt: bool = False):
+    """Run pre-trade backtest and show results"""
+    try:
+        from src.pre_trade_backtest import run_symbol_backtest
+        
+        if not quiet:
+            print(f"\n🔍 Running backtest for {symbol}...")
+            print("This may take a few minutes...")
+        
+        # Run backtest
+        result = run_symbol_backtest(symbol, config)
+        
+        if not result.get('success', False):
+            if not quiet:
+                print(f"❌ Backtest failed: {result.get('error', 'Unknown error')}")
+            return False
+        
+        if not quiet:
+            print("\n" + "=" * 60)
+            print(f"📊 BACKTEST RESULTS FOR {symbol}")
+            print("=" * 60)
+            
+            # Display key metrics
+            total_trades = result.get('total_trades', 0)
+            if total_trades == 0:
+                print(f"⚠️  {result.get('message', 'No signals generated')}")
+                print(f"💡 {result.get('recommendation', 'Consider adjusting parameters')}")
+                return False
+            
+            win_rate = result.get('win_rate', 0)
+            profit_factor = result.get('profit_factor', 0)
+            total_pnl = result.get('total_pnl', 0)
+            risk_level = result.get('risk_level', 'UNKNOWN')
+            recommendation = result.get('recommendation', 'No recommendation')
+            
+            print(f"📈 Total Trades: {total_trades}")
+            print(f"🎯 Win Rate: {win_rate:.1f}%")
+            print(f"💰 Total P&L: ${total_pnl:.2f}")
+            print(f"📊 Profit Factor: {profit_factor:.2f}")
+            print(f"⚠️  Risk Level: {risk_level}")
+            print(f"💡 Recommendation: {recommendation}")
+            
+            # Additional details
+            sl_rate = result.get('sl_rate', 0)
+            tp_rate = result.get('tp_rate', 0)
+            avg_duration = result.get('avg_duration_hours', 0)
+            
+            print(f"\n📊 Exit Analysis:")
+            print(f"   TP Hits: {result.get('tp_hits', 0)} ({tp_rate:.1f}%)")
+            print(f"   SL Hits: {result.get('sl_hits', 0)} ({sl_rate:.1f}%)")
+            print(f"   No Exit: {result.get('no_exit', 0)}")
+            
+            print(f"\n⏱️  Timing:")
+            print(f"   Average Duration: {avg_duration:.1f} hours")
+            print(f"   Backtest Period: {result.get('backtest_period_days', 0)} days")
+            
+            # Risk assessment
+            if risk_level == "HIGH":
+                print(f"\n🚨 WARNING: High risk level detected!")
+                print(f"   Consider adjusting parameters before trading")
+            elif risk_level == "MEDIUM":
+                print(f"\n⚠️  CAUTION: Medium risk level")
+                print(f"   Monitor performance closely")
+            else:
+                print(f"\n✅ Good risk level - safe to proceed")
+            
+            print("=" * 60)
+        
+        # ALWAYS ask for confirmation - IGNORE ALL FLAGS!
+        while True:
+            response = input("\n❓ Continue with live trading? (Y/N): ").strip().upper()
+            if response in ['Y', 'YES']:
+                print("✅ Proceeding with live trading...")
+                return True
+            elif response in ['N', 'NO']:
+                print("❌ Trading cancelled by user")
+                sys.exit(0)
+            else:
+                print("Please enter Y or N")
+        
+    except Exception as e:
+        if not quiet:
+            print(f"❌ Backtest error: {e}")
+        logging.error(f"Backtest error: {e}", exc_info=True)
+        return False
 
 if __name__ == '__main__':
     try:

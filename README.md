@@ -37,14 +37,43 @@ venv\Scripts\python.exe -m pip install pandas numpy
 
 ## Використання
 
-### Запуск бектесту
+### Запуск з автоматичним бектестом
 
+#### Консольний запуск
 ```bash
-venv\Scripts\python.exe main.py --ltf data/btc_15m.csv --htf data/btc_4h.csv
+# Запуск з бектестом перед трейдингом
+venv\Scripts\python.exe live_trading.py --symbol SOLUSDT --run-backtest
+
+# Запуск з бектестом на 60 днів
+venv\Scripts\python.exe live_trading.py --symbol BTCUSDT --run-backtest --backtest-days 60
+
+# Запуск без підтвердження після бектесту
+venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --run-backtest --skip-backtest-prompt
 ```
+
+#### Через меню (start_trading_menu.bat)
+1. Запустіть `start_trading_menu.bat`
+2. Виберіть опцію **7) Run with Backtest**
+3. Виберіть торгову пару
+4. Бот автоматично запустить бектест та покаже результати
+5. Підтвердьте продовження трейдингу
+
+#### Веб-інтерфейс
+```bash
+# Запуск веб-сервера
+python web/start-web.py
+
+# API ендпоінти для бектесту:
+POST /api/backtest/{symbol}          # Запуск бектесту для пари
+GET  /api/backtest/{symbol}/results  # Отримання результатів
+POST /api/start-with-backtest        # Запуск трейдингу з бектестом
+```
+
+### Запуск бектесту (окремо)
 
 ### Параметри командного рядка
 
+#### Основні параметри
 - `--ltf` - Lower timeframe CSV файл (обов'язково)
 - `--htf` - Higher timeframe CSV файл (обов'язково)
 - `--rr` - Мінімальний Risk/Reward ratio (за замовчуванням: 3.0)
@@ -52,6 +81,11 @@ venv\Scripts\python.exe main.py --ltf data/btc_15m.csv --htf data/btc_4h.csv
 - `--right` - Fractal right bars (за замовчуванням: 2)
 - `--out` - Вихідний файл (за замовчуванням: signals.csv)
 - `--require-fvg` - Вимагати FVG confluence для сигналів
+
+#### Параметри бектесту (live_trading.py)
+- `--run-backtest` - Запустити бектест перед трейдингом
+- `--backtest-days` - Кількість днів для бектесту (за замовчуванням: 30)
+- `--skip-backtest-prompt` - Пропустити підтвердження після бектесту
 
 ### Приклади
 
@@ -89,6 +123,7 @@ Timestamp може бути:
 
 ## Результати
 
+### Торгові сигнали
 Результати зберігаються в CSV файл з колонками:
 - `timestamp` - Час входу
 - `direction` - LONG/SHORT
@@ -98,6 +133,28 @@ Timestamp може бути:
 - `rr` - Risk/Reward ratio
 - `htf_bias` - HTF тренд (bull/bear)
 - `fvg_confluence` - Чи є FVG confluence
+
+### Результати бектесту
+Бектест зберігає результати в папці `backtest_results/{SYMBOL}/`:
+
+```
+backtest_results/
+├── SOLUSDT/
+│   ├── latest_results.json      # Останні результати
+│   ├── history/                 # Історія всіх бектестів
+│   │   ├── 2024-01-15_10-30-00.json
+│   │   └── 2024-01-15_14-45-00.json
+│   └── summary.csv              # Зведена статистика
+└── global_summary.csv            # Глобальна статистика
+```
+
+#### Метрики бектесту
+- **Total Trades** - Загальна кількість угод
+- **Win Rate** - Відсоток прибуткових угод
+- **Profit Factor** - Співвідношення прибутку до збитків
+- **Total P&L** - Загальний прибуток/збиток
+- **Risk Level** - LOW/MEDIUM/HIGH
+- **Recommendation** - Рекомендація щодо торгівлі
 
 ## Live Trading Monitor
 

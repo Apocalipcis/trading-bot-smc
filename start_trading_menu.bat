@@ -16,7 +16,7 @@ echo ===============================
 echo       SMC Live Trading Monitor
 echo ===============================
 echo.
-echo Choose a trading pair:
+echo Choose a trading pair (with backtest):
 echo.
 echo  1) BTCUSDT  - Bitcoin
 echo  2) ETHUSDT  - Ethereum
@@ -32,12 +32,12 @@ echo  9) Exit
 echo.
 set /p choice="Enter your choice (1-9): "
 
-if "%choice%"=="1" set "SYMBOL=BTCUSDT"& goto START_TRADING
-if "%choice%"=="2" set "SYMBOL=ETHUSDT" & goto START_TRADING
-if "%choice%"=="3" set "SYMBOL=BNBUSDT" & goto START_TRADING
-if "%choice%"=="4" set "SYMBOL=SOLUSDT" & goto START_TRADING
-if "%choice%"=="5" set "SYMBOL=DOGEUSDT" & goto START_TRADING
-if "%choice%"=="6" goto CUSTOM_PAIR
+if "%choice%"=="1" set "SYMBOL=BTCUSDT"& goto BACKTEST_TRADING
+if "%choice%"=="2" set "SYMBOL=ETHUSDT" & goto BACKTEST_TRADING
+if "%choice%"=="3" set "SYMBOL=BNBUSDT" & goto BACKTEST_TRADING
+if "%choice%"=="4" set "SYMBOL=SOLUSDT" & goto BACKTEST_TRADING
+if "%choice%"=="5" set "SYMBOL=DOGEUSDT" & goto BACKTEST_TRADING
+if "%choice%"=="6" goto CUSTOM_PAIR_BACKTEST
 if "%choice%"=="7" goto SETTINGS
 if "%choice%"=="8" goto HELP
 if "%choice%"=="9" goto EXIT
@@ -46,11 +46,13 @@ echo Invalid choice! Press any key to try again...
 pause >nul
 goto MAIN_MENU
 
-:CUSTOM_PAIR
+rem RUN_WITH_BACKTEST section removed - all pairs now go directly to backtest
+
+:CUSTOM_PAIR_BACKTEST
 cls
 echo.
 echo ===============================
-echo        Custom Trading Pair
+echo    Custom Trading Pair (with backtest)
 echo ===============================
 echo.
 echo Enter a trading pair (e.g., ATOMUSDT, LINKUSDT):
@@ -65,8 +67,68 @@ if "%SYMBOL%"=="" (
 echo.
 echo You entered: %SYMBOL%
 set /p confirm="Is this correct? (Y/N): "
-if /i "%confirm%"=="Y" goto START_TRADING
+if /i "%confirm%"=="Y" (
+    rem Defaults if not set
+    if not defined RR set "RR=3.0"
+    if not defined INTERVAL set "INTERVAL=45"
+    if not defined ALERTS set "ALERTS=--desktop-alerts"
+    
+    if exist "%PY%" (
+        echo Starting bot with backtest...
+        "%PY%" "%SCRIPT%" --symbol "%SYMBOL%" --rr %RR% --status-check-interval %INTERVAL% %ALERTS% --run-backtest --backtest-days 30
+    ) else (
+        echo Error: Virtual environment not found!
+        echo Please create it and install dependencies:
+        echo   python -m venv venv
+        echo   venv\Scripts\pip install -r requirements.txt
+    )
+    
+    echo.
+    echo Bot stopped. Press any key to return to the menu...
+    pause >nul
+    goto MAIN_MENU
+)
 goto MAIN_MENU
+
+:BACKTEST_TRADING
+cls
+echo.
+echo ===============================
+echo    Starting Trading Bot with Backtest
+echo ===============================
+echo.
+echo Symbol: %SYMBOL%
+echo Mode: Backtest + Live Trading
+echo.
+echo The bot will:
+echo  1. Run a 30-day backtest first
+echo  2. Show you the results
+echo  3. Ask if you want to continue (Y/N)
+echo  4. Start live trading if you choose Y
+echo.
+pause
+
+rem Defaults if not set
+if not defined RR set "RR=3.0"
+if not defined INTERVAL set "INTERVAL=45"
+if not defined ALERTS set "ALERTS=--desktop-alerts"
+
+if exist "%PY%" (
+    echo Starting bot with backtest...
+    "%PY%" "%SCRIPT%" --symbol "%SYMBOL%" --rr %RR% --status-check-interval %INTERVAL% %ALERTS% --run-backtest --backtest-days 30
+) else (
+    echo Error: Virtual environment not found!
+    echo Please create it and install dependencies:
+    echo   python -m venv venv
+    echo   venv\Scripts\pip install -r requirements.txt
+)
+
+echo.
+echo Bot stopped. Press any key to return to the menu...
+pause >nul
+goto MAIN_MENU
+
+rem CUSTOM_PAIR section removed - now handled by CUSTOM_PAIR_BACKTEST
 
 :SETTINGS
 cls
@@ -117,41 +179,7 @@ echo.
 pause
 goto MAIN_MENU
 
-:START_TRADING
-cls
-echo.
-echo ===============================
-echo        Starting Trading Bot
-echo ===============================
-echo.
-echo Symbol: %SYMBOL%
-echo Risk/Reward: %RR%
-echo Check interval: %INTERVAL%s
-echo Alerts: %ALERTS%
-echo.
-echo Press Ctrl+C or Q to stop the bot...
-echo.
-pause
-
-rem Defaults if not set
-if not defined RR set "RR=3.0"
-if not defined INTERVAL set "INTERVAL=45"
-if not defined ALERTS set "ALERTS=--desktop-alerts"
-
-if exist "%PY%" (
-    echo Starting bot with venv Python...
-    "%PY%" "%SCRIPT%" --symbol "%SYMBOL%" --rr %RR% --status-check-interval %INTERVAL% %ALERTS% --quiet
-) else (
-    echo Error: Virtual environment not found!
-    echo Please create it and install dependencies:
-    echo   python -m venv venv
-    echo   venv\Scripts\pip install -r requirements.txt
-)
-
-echo.
-echo Bot stopped. Press any key to return to the menu...
-pause >nul
-goto MAIN_MENU
+rem START_TRADING section removed - all pairs now go through backtest
 
 :HELP
 cls
@@ -199,3 +227,4 @@ set "SYMBOL="
 set "RR="
 set "INTERVAL="
 set "ALERTS="
+rem All pairs now use backtest by default

@@ -22,6 +22,7 @@ sys.path.append(str(project_root))
 
 from src.live_smc_engine import LiveSMCEngine
 from src.telegram_client import TelegramClient
+from src.pre_trade_backtest import run_symbol_backtest, run_multiple_backtests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -89,13 +90,37 @@ class BotManager:
         self.market_data: Dict[str, Dict] = {}  # Symbol -> {price, bias, etc}
         self.is_running: bool = False
         self.websocket_connections: List[WebSocket] = []
+        self.backtest_results: Dict[str, Dict] = {}  # Symbol -> backtest results
         
-    async def start_engines(self):
+    async def start_engines(self, run_backtest_first: bool = False):
         """Start SMC engines for all configured symbols"""
         if self.is_running:
             await self.stop_engines()
             
         try:
+            # Run backtest first if requested
+            if run_backtest_first:
+                logger.info("Running pre-trade backtests...")
+                config_dict = {
+                    'min_risk_reward': self.config.min_risk_reward,
+                    'fractal_left': self.config.fractal_left,
+                    'fractal_right': self.config.fractal_right,
+                    'backtest_days': 30
+                }
+                
+                backtest_results = await asyncio.create_task(
+                    asyncio.to_thread(run_multiple_backtests, self.config.symbols, config_dict)
+                )
+                
+                # Log backtest results
+                for symbol, result in backtest_results.items():
+                    if result.get('success', False):
+                        logger.info(f"Backtest for {symbol}: {result.get('win_rate', 0):.1f}% win rate, {result.get('profit_factor', 0):.2f} profit factor")
+                    else:
+                        logger.warning(f"Backtest failed for {symbol}: {result.get('error', 'Unknown error')}")
+                
+                # Store backtest results for display
+                self.backtest_results = backtest_results
             # Convert config to dict
             config_dict = {
                 'min_risk_reward': self.config.min_risk_reward,
@@ -403,6 +428,98 @@ async def send_test_alert(signal: dict):
     except Exception as e:
         logger.error(f"Failed to send test alert: {e}")
         return {"message": f"Failed to send test alert: {e}", "error": True}
+
+@app.post("/api/backtest/{symbol}")
+async def run_backtest(symbol: str):
+    """Run backtest for a specific symbol"""
+    try:
+        symbol = symbol.upper().strip()
+        
+        # Get current config
+        config_dict = {
+            'min_risk_reward': bot_manager.config.min_risk_reward,
+            'fractal_left': bot_manager.config.fractal_left,
+            'fractal_right': bot_manager.config.fractal_right,
+            'backtest_days': 30
+        }
+        
+        logger.info(f"Running backtest for {symbol}")
+        
+        # Run backtest
+        result = await asyncio.create_task(
+            asyncio.to_thread(run_symbol_backtest, symbol, config_dict)
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Backtest failed for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Backtest failed: {e}")
+
+@app.get("/api/backtest/{symbol}/results")
+async def get_backtest_results(symbol: str):
+    """Get latest backtest results for a symbol"""
+    try:
+        symbol = symbol.upper().strip()
+        
+        # Import here to avoid circular imports
+        from src.pre_trade_backtest import PreTradeBacktest
+        
+        backtest = PreTradeBacktest(symbol, {})
+        results = backtest.get_latest_results()
+        
+        if results:
+            return results
+        else:
+            return {"message": f"No backtest results found for {symbol}"}
+            
+    except Exception as e:
+        logger.error(f"Failed to get backtest results for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get results: {e}")
+
+@app.post("/api/start-with-backtest")
+async def start_with_backtest():
+    """Start trading with backtest for all symbols"""
+    try:
+        results = {}
+        
+        # Run backtests for all configured symbols
+        config_dict = {
+            'min_risk_reward': bot_manager.config.min_risk_reward,
+            'fractal_left': bot_manager.config.fractal_left,
+            'fractal_right': bot_manager.config.fractal_right,
+            'backtest_days': 30
+        }
+        
+        logger.info("Running backtests for all symbols")
+        
+        # Run backtests
+        backtest_results = await asyncio.create_task(
+            asyncio.to_thread(run_multiple_backtests, bot_manager.config.symbols, config_dict)
+        )
+        
+        # Check if any backtests failed
+        failed_symbols = [sym for sym, res in backtest_results.items() if not res.get('success', False)]
+        
+        if failed_symbols:
+            return {
+                "success": False,
+                "message": f"Backtests failed for: {', '.join(failed_symbols)}",
+                "results": backtest_results
+            }
+        
+        # Start engines if all backtests passed
+        await bot_manager.start_engines()
+        
+        return {
+            "success": True,
+            "message": "Trading started successfully after backtests",
+            "backtest_results": backtest_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to start with backtest: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start with backtest: {e}")
 
 # WebSocket endpoint
 @app.websocket("/ws")
