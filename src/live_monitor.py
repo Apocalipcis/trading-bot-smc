@@ -31,6 +31,17 @@ from plyer import notification
 from .live_smc_engine import LiveSMCEngine
 from .telegram_client import TelegramClient
 
+def format_price(price: float) -> str:
+    """Format price with appropriate decimal places based on value"""
+    if price >= 100:
+        return f"{price:.2f}"
+    elif price >= 1:
+        return f"{price:.4f}"
+    elif price >= 0.01:
+        return f"{price:.6f}"
+    else:
+        return f"{price:.8f}"
+
 class LiveMonitorTUI:
     """Terminal User Interface for Live SMC Monitor"""
     
@@ -169,7 +180,7 @@ class LiveMonitorTUI:
         header_text.append(f" | {self.symbol}", style="bold white")
         header_text.append(f" | Status: ", style="white")
         header_text.append(f"{self.status.upper()}", style=f"bold {status_color}")
-        header_text.append(f" | Price: ${self.current_price:.2f}", style="bold white")
+        header_text.append(f" | Price: ${format_price(self.current_price)}", style="bold white")
         header_text.append(f" | HTF Bias: ", style="white")
         header_text.append(f"{self.htf_bias.upper()}", style=f"bold {bias_color}")
         
@@ -213,9 +224,9 @@ class LiveMonitorTUI:
             table.add_row(
                 time_str,
                 Text(direction, style=dir_style),
-                f"${signal['entry']:.2f}",
-                f"${signal['sl']:.2f}",
-                f"${signal['tp']:.2f}",
+                f"${format_price(signal['entry'])}",
+                f"${format_price(signal['sl'])}",
+                f"${format_price(signal['tp'])}",
                 f"{signal['rr']:.1f}",
                 signal.get('confidence', 'med'),
                 status
@@ -379,8 +390,8 @@ class LiveMonitorTUI:
             # Desktop notification
             notification.notify(
                 title=f"🚨 SMC Signal - {self.symbol}",
-                message=f"{direction_emoji} {signal['direction']} @ ${signal['entry']:.2f}\n"
-                       f"SL: ${signal['sl']:.2f} | TP: ${signal['tp']:.2f}\n"
+                message=f"{direction_emoji} {signal['direction']} @ ${format_price(signal['entry'])}\n"
+                       f"SL: ${format_price(signal['sl'])} | TP: ${format_price(signal['tp'])}\n"
                        f"RR: {signal['rr']:.1f} | Confidence: {signal.get('confidence', 'medium')}",
                 timeout=10
             )
@@ -398,16 +409,7 @@ class LiveMonitorTUI:
                 # Telegram might fail, log but don't crash
                 print(f"Failed to send Telegram notification: {e}")
 
-        token = self.config.get('telegram_token')
-        chat_id = self.config.get('telegram_chat_id')
-        if token and chat_id:
-            message = (
-                f"SMC Signal - {self.symbol}\n"
-                f"{direction_emoji} {signal['direction']} @ ${signal['entry']:.2f}\n"
-                f"SL: ${signal['sl']:.2f} | TP: ${signal['tp']:.2f}\n"
-                f"RR: {signal['rr']:.1f} | Confidence: {signal.get('confidence', 'medium')}"
-            )
-            send_telegram_message(token, chat_id, message)
+
             
     def _update_stats(self):
         """Update statistics"""
@@ -478,7 +480,7 @@ class LiveMonitorTUI:
             try:
                 test_message = f"🧪 Test message from SMC Bot\n\n" \
                               f"📍 Symbol: {self.symbol}\n" \
-                              f"💰 Current Price: ${self.current_price:,.2f}\n" \
+                              f"💰 Current Price: ${format_price(self.current_price)}\n" \
                               f"📊 HTF Bias: {self.htf_bias.upper()}\n" \
                               f"🕐 Time: {datetime.now().strftime('%H:%M:%S')}\n\n" \
                               f"✅ Bot is working correctly!"
@@ -546,7 +548,7 @@ class LiveMonitorTUI:
             return
             
         latest_signal = self.signals[-1]
-        entry_price = f"{latest_signal['entry']:.2f}"
+        entry_price = f"{format_price(latest_signal['entry'])}"
         
         try:
             pyperclip.copy(entry_price)
@@ -561,7 +563,7 @@ class LiveMonitorTUI:
             return
             
         latest_signal = self.signals[-1]
-        sl_price = f"{latest_signal['sl']:.2f}"
+        sl_price = f"{format_price(latest_signal['sl'])}"
         
         try:
             pyperclip.copy(sl_price)
@@ -576,7 +578,7 @@ class LiveMonitorTUI:
             return
             
         latest_signal = self.signals[-1]
-        tp_price = f"{latest_signal['tp']:.2f}"
+        tp_price = f"{format_price(latest_signal['tp'])}"
         
         try:
             pyperclip.copy(tp_price)
@@ -593,9 +595,9 @@ class LiveMonitorTUI:
         latest_signal = self.signals[-1]
         signal_text = (
             f"Signal: {latest_signal['direction']} {self.symbol}\n"
-            f"Entry: ${latest_signal['entry']:.2f}\n"
-            f"SL: ${latest_signal['sl']:.2f}\n"
-            f"TP: ${latest_signal['tp']:.2f}\n"
+            f"Entry: ${format_price(latest_signal['entry'])}\n"
+            f"SL: ${format_price(latest_signal['sl'])}\n"
+            f"TP: ${format_price(latest_signal['tp'])}\n"
             f"RR: {latest_signal['rr']:.1f}\n"
             f"Time: {latest_signal['timestamp'].strftime('%H:%M:%S')}"
         )
@@ -612,7 +614,7 @@ class LiveMonitorTUI:
             self.last_copy_message = "No market price available"
             return
             
-        price_text = f"{self.current_price:.2f}"
+        price_text = f"{format_price(self.current_price)}"
         
         try:
             pyperclip.copy(price_text)
