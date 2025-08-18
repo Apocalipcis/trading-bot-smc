@@ -36,7 +36,7 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: BNBUSDT
-  enabled: false
+  enabled: true
   backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
