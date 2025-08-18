@@ -60,7 +60,7 @@ def test_backtest_api():
         
     except requests.exceptions.ConnectionError:
         print("❌ Cannot connect to web server")
-        print("   Make sure web server is running: python web/start-web.py")
+        print("   Make sure web server is running: python start_web_panel.py")
     except Exception as e:
         print(f"❌ Test failed with error: {e}")
 

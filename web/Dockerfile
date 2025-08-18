@@ -38,4 +38,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/status || exit 1
 
 # Start command
-CMD ["python", "web/backend/main.py"]
+CMD ["python", "start_web_panel.py"]
