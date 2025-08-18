@@ -8,7 +8,7 @@ import sys
 import os
 
 # Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 def test_timestamp_arithmetic():
     """Test timestamp arithmetic operations"""

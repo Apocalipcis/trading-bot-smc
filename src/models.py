@@ -45,3 +45,18 @@ class Signal:
     ob_idx: int
     bos_idx: int
     fvg_confluence: bool
+    
+    def to_dict(self):
+        """Convert signal to dictionary"""
+        return {
+            'timestamp': self.timestamp,
+            'direction': self.direction,
+            'entry': self.entry,
+            'sl': self.sl,
+            'tp': self.tp,
+            'rr': self.rr,
+            'htf_bias': self.htf_bias,
+            'ob_idx': self.ob_idx,
+            'bos_idx': self.bos_idx,
+            'fvg_confluence': self.fvg_confluence
+        }

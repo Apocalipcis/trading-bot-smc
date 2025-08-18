@@ -107,7 +107,8 @@ class SMCStrategy(Strategy):
         
         # Ensure timestamp column is properly formatted as pandas datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df.set_index('timestamp', inplace=True)
+        # Keep numeric index for SMC functions compatibility
+        # df.set_index('timestamp', inplace=True)  # Commented out to preserve numeric indices
         
         # Ensure all numeric columns are float64
         for col in ['open', 'high', 'low', 'close', 'volume']:
@@ -260,7 +261,7 @@ class SMCStrategy(Strategy):
             
             # Create signal
             signal = Signal(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(),
                 symbol=self.symbol,
                 direction=direction,
                 entry=float(entry_price),
