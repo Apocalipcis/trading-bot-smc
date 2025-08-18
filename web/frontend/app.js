@@ -1,0 +1,511 @@
+// SMC Trading Bot - Web Interface JavaScript
+
+class SMCWebInterface {
+    constructor() {
+        this.ws = null;
+        this.isConnected = false;
+        this.signals = [];
+        this.config = {
+            symbols: ['ETHUSDT'],
+            min_risk_reward: 3.0,
+            fractal_left: 2,
+            fractal_right: 2,
+            telegram_token: '',
+            telegram_chat_id: '',
+            status_check_interval: 45
+        };
+        
+        this.initializeElements();
+        this.bindEvents();
+        this.connectWebSocket();
+        this.loadConfig();
+    }
+    
+    initializeElements() {
+        // Control elements
+        this.symbolsInput = document.getElementById('symbols');
+        this.minRrInput = document.getElementById('min-rr');
+        this.startBtn = document.getElementById('start-btn');
+        this.stopBtn = document.getElementById('stop-btn');
+        this.clearBtn = document.getElementById('clear-btn');
+        
+        // Status elements
+        this.statusText = document.getElementById('status-text');
+        this.statusDot = document.getElementById('status-dot');
+        this.activePairs = document.getElementById('active-pairs');
+        this.enginesCount = document.getElementById('engines-count');
+        this.wsStatus = document.getElementById('ws-status');
+        this.symbolsGrid = document.getElementById('symbols-grid');
+        
+        // Statistics elements
+        this.totalSignals = document.getElementById('total-signals');
+        this.validSignals = document.getElementById('valid-signals');
+        this.triggeredSignals = document.getElementById('triggered-signals');
+        this.tpSignals = document.getElementById('tp-signals');
+        this.slSignals = document.getElementById('sl-signals');
+        this.winRate = document.getElementById('win-rate');
+        
+        // Table elements
+        this.signalsTable = document.getElementById('signals-tbody');
+        
+        // Telegram elements
+        this.telegramToken = document.getElementById('telegram-token');
+        this.telegramChatId = document.getElementById('telegram-chat-id');
+        this.saveTelegramBtn = document.getElementById('save-telegram-btn');
+    }
+    
+    bindEvents() {
+        // Control buttons
+        this.startBtn.addEventListener('click', () => this.startBot());
+        this.stopBtn.addEventListener('click', () => this.stopBot());
+        this.clearBtn.addEventListener('click', () => this.clearSignals());
+        
+        // Config inputs
+        this.symbolsInput.addEventListener('change', () => this.updateConfig());
+        this.minRrInput.addEventListener('change', () => this.updateConfig());
+        
+        // Telegram config
+        this.saveTelegramBtn.addEventListener('click', () => this.saveTelegramConfig());
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 's':
+                        e.preventDefault();
+                        this.startBot();
+                        break;
+                    case 'x':
+                        e.preventDefault();
+                        this.stopBot();
+                        break;
+                    case 'd':
+                        e.preventDefault();
+                        this.clearSignals();
+                        break;
+                }
+            }
+        });
+    }
+    
+    connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        
+        this.ws = new WebSocket(wsUrl);
+        
+        this.ws.onopen = () => {
+            this.isConnected = true;
+            this.updateConnectionStatus(true);
+            this.showToast('Connected to SMC Bot', 'success');
+        };
+        
+        this.ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            this.handleWebSocketMessage(message);
+        };
+        
+        this.ws.onclose = () => {
+            this.isConnected = false;
+            this.updateConnectionStatus(false);
+            this.showToast('Disconnected from SMC Bot', 'error');
+            
+            // Attempt to reconnect after 3 seconds
+            setTimeout(() => {
+                if (!this.isConnected) {
+                    this.connectWebSocket();
+                }
+            }, 3000);
+        };
+        
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            this.showToast('WebSocket connection error', 'error');
+        };
+    }
+    
+    handleWebSocketMessage(message) {
+        switch (message.type) {
+            case 'initial_data':
+                this.handleInitialData(message.data);
+                break;
+                
+            case 'new_signal':
+                this.handleNewSignal(message.data);
+                break;
+                
+            case 'status_update':
+                this.handleStatusUpdate(message.data);
+                break;
+                
+            case 'signals_cleared':
+                this.signals = [];
+                this.updateSignalsTable();
+                this.updateStatistics();
+                break;
+                
+            case 'heartbeat':
+                // Keep alive
+                break;
+                
+            default:
+                console.log('Unknown message type:', message.type);
+        }
+    }
+    
+    handleInitialData(data) {
+        this.signals = data.signals || [];
+        this.config = { ...this.config, ...data.config };
+        
+        // Update UI with config
+        this.symbolsInput.value = this.config.symbols ? this.config.symbols.join(',') : 'ETHUSDT';
+        this.minRrInput.value = this.config.min_risk_reward;
+        this.telegramToken.value = this.config.telegram_token || '';
+        this.telegramChatId.value = this.config.telegram_chat_id || '';
+        
+        // Update status
+        this.updateBotStatus(data.status.is_running);
+        this.updateMarketInfo(data.status);
+        
+        // Update tables and stats
+        this.updateSignalsTable();
+        this.updateStatistics();
+    }
+    
+    handleNewSignal(signal) {
+        this.signals.push(signal);
+        
+        // Keep only last 50 signals
+        if (this.signals.length > 50) {
+            this.signals = this.signals.slice(-50);
+        }
+        
+        this.updateSignalsTable();
+        this.updateStatistics();
+        
+        // Show notification
+        this.showToast(`New ${signal.direction} signal for ${signal.symbol}`, 'success');
+        
+        // Browser notification (if permitted)
+        this.showBrowserNotification(signal);
+    }
+    
+    handleStatusUpdate(data) {
+        this.updateBotStatus(data.is_running);
+        this.updateMarketInfo(data);
+    }
+    
+    updateConnectionStatus(connected) {
+        this.statusText.textContent = connected ? 'Connected' : 'Disconnected';
+        this.statusDot.className = `status-dot ${connected ? 'online' : 'offline'}`;
+        this.wsStatus.textContent = connected ? 'Connected' : 'Disconnected';
+        this.wsStatus.className = connected ? 'status-online' : 'status-offline';
+    }
+    
+    updateBotStatus(isRunning) {
+        this.startBtn.disabled = isRunning;
+        this.stopBtn.disabled = !isRunning;
+        
+        if (isRunning) {
+            this.statusText.textContent = 'Bot Running';
+            this.statusDot.className = 'status-dot online';
+        } else if (this.isConnected) {
+            this.statusText.textContent = 'Bot Stopped';
+            this.statusDot.className = 'status-dot offline';
+        }
+    }
+    
+    updateMarketInfo(data) {
+        // Update basic info
+        this.activePairs.textContent = data.symbols ? data.symbols.join(', ') : 'None';
+        this.enginesCount.textContent = data.engines_count || 0;
+        
+        // Update symbol cards
+        this.updateSymbolCards(data.market_data || {});
+    }
+    
+    updateSymbolCards(marketData) {
+        this.symbolsGrid.innerHTML = '';
+        
+        Object.entries(marketData).forEach(([symbol, data]) => {
+            const card = document.createElement('div');
+            card.className = `symbol-card ${data.status || 'connecting'}`;
+            
+            card.innerHTML = `
+                <div class="symbol-header">
+                    <div class="symbol-name">${symbol}</div>
+                    <div class="symbol-status ${data.status || 'connecting'}">${(data.status || 'connecting').toUpperCase()}</div>
+                </div>
+                <div class="symbol-details">
+                    <div class="symbol-detail">
+                        <div class="symbol-detail-label">Price</div>
+                        <div class="symbol-detail-value">$${this.formatPrice(data.current_price || 0)}</div>
+                    </div>
+                    <div class="symbol-detail">
+                        <div class="symbol-detail-label">HTF Bias</div>
+                        <div class="symbol-detail-value bias-${(data.htf_bias || 'neutral').toLowerCase()}">
+                            ${(data.htf_bias || 'NEUTRAL').toUpperCase()}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            this.symbolsGrid.appendChild(card);
+        });
+    }
+    
+    updateSignalsTable() {
+        if (this.signals.length === 0) {
+            this.signalsTable.innerHTML = `
+                <tr class="no-signals">
+                    <td colspan="9">
+                        <i class="fas fa-hourglass-half"></i> Waiting for signals...
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        // Show last 20 signals (most recent first)
+        const recentSignals = this.signals.slice(-20).reverse();
+        
+        this.signalsTable.innerHTML = recentSignals.map(signal => {
+            const time = new Date(signal.timestamp_str).toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            const directionClass = signal.direction === 'LONG' ? 'signal-long' : 'signal-short';
+            const statusBadge = this.getStatusBadge(signal.status);
+            
+            return `
+                <tr>
+                    <td>${time}</td>
+                    <td><span class="${directionClass}">${signal.direction}</span></td>
+                    <td>$${this.formatPrice(signal.entry)}</td>
+                    <td>$${this.formatPrice(signal.sl)}</td>
+                    <td>$${this.formatPrice(signal.tp)}</td>
+                    <td>${signal.rr.toFixed(1)}</td>
+                    <td>${signal.confidence || 'med'}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <button class="action-btn copy-btn" onclick="copyToClipboard('${signal.entry}')" title="Copy Entry">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button class="action-btn copy-btn" onclick="copyToClipboard('${signal.sl}')" title="Copy SL">
+                            SL
+                        </button>
+                        <button class="action-btn copy-btn" onclick="copyToClipboard('${signal.tp}')" title="Copy TP">
+                            TP
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+    
+    updateStatistics() {
+        const total = this.signals.length;
+        let valid = 0, triggered = 0, hitTp = 0, hitSl = 0;
+        
+        this.signals.forEach(signal => {
+            const status = signal.status || 'new';
+            switch (status) {
+                case 'valid': valid++; break;
+                case 'triggered': triggered++; break;
+                case 'hit_tp': hitTp++; break;
+                case 'hit_sl': hitSl++; break;
+            }
+        });
+        
+        const totalClosed = hitTp + hitSl;
+        const winRate = totalClosed > 0 ? ((hitTp / totalClosed) * 100).toFixed(1) : 0;
+        
+        this.totalSignals.textContent = total;
+        this.validSignals.textContent = valid;
+        this.triggeredSignals.textContent = triggered;
+        this.tpSignals.textContent = hitTp;
+        this.slSignals.textContent = hitSl;
+        this.winRate.textContent = `${winRate}%`;
+    }
+    
+    getStatusBadge(status) {
+        if (!status) return '<span class="status-badge status-new">NEW</span>';
+        
+        const statusMap = {
+            'new': { text: 'NEW', class: 'status-new' },
+            'valid': { text: 'VALID', class: 'status-valid' },
+            'triggered': { text: 'TRIGGERED', class: 'status-triggered' },
+            'hit_tp': { text: 'HIT TP', class: 'status-hit-tp' },
+            'hit_sl': { text: 'HIT SL', class: 'status-hit-sl' },
+            'missed': { text: 'MISSED', class: 'status-missed' },
+            'expired': { text: 'EXPIRED', class: 'status-expired' }
+        };
+        
+        const statusInfo = statusMap[status] || { text: status.toUpperCase(), class: 'status-new' };
+        return `<span class="status-badge ${statusInfo.class}">${statusInfo.text}</span>`;
+    }
+    
+    formatPrice(price) {
+        if (price >= 100) return price.toFixed(2);
+        if (price >= 1) return price.toFixed(4);
+        if (price >= 0.01) return price.toFixed(6);
+        return price.toFixed(8);
+    }
+    
+    async startBot() {
+        try {
+            await this.updateConfig();
+            const response = await fetch('/api/start', { method: 'POST' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showToast('Bot started successfully', 'success');
+            } else {
+                throw new Error(data.detail || 'Failed to start bot');
+            }
+        } catch (error) {
+            this.showToast(`Error starting bot: ${error.message}`, 'error');
+        }
+    }
+    
+    async stopBot() {
+        try {
+            const response = await fetch('/api/stop', { method: 'POST' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showToast('Bot stopped successfully', 'success');
+            } else {
+                throw new Error(data.detail || 'Failed to stop bot');
+            }
+        } catch (error) {
+            this.showToast(`Error stopping bot: ${error.message}`, 'error');
+        }
+    }
+    
+    async clearSignals() {
+        try {
+            const response = await fetch('/api/signals', { method: 'DELETE' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showToast('Signals cleared', 'success');
+            } else {
+                throw new Error(data.detail || 'Failed to clear signals');
+            }
+        } catch (error) {
+            this.showToast(`Error clearing signals: ${error.message}`, 'error');
+        }
+    }
+    
+    async updateConfig() {
+        // Parse symbols from comma-separated string
+        const symbolsText = this.symbolsInput.value.toUpperCase().trim();
+        this.config.symbols = symbolsText ? symbolsText.split(',').map(s => s.trim()).filter(s => s) : ['ETHUSDT'];
+        this.config.min_risk_reward = parseFloat(this.minRrInput.value);
+        
+        try {
+            const response = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.config)
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to update config');
+            }
+        } catch (error) {
+            console.error('Error updating config:', error);
+        }
+    }
+    
+    async saveTelegramConfig() {
+        this.config.telegram_token = this.telegramToken.value;
+        this.config.telegram_chat_id = this.telegramChatId.value;
+        
+        try {
+            await this.updateConfig();
+            this.showToast('Telegram configuration saved', 'success');
+        } catch (error) {
+            this.showToast('Error saving Telegram config', 'error');
+        }
+    }
+    
+    loadConfig() {
+        const saved = localStorage.getItem('smc-config');
+        if (saved) {
+            const config = JSON.parse(saved);
+            this.symbolsInput.value = config.symbols ? config.symbols.join(',') : 'ETHUSDT,BTCUSDT';
+            this.minRrInput.value = config.min_risk_reward || 3.0;
+            this.telegramToken.value = config.telegram_token || '';
+            this.telegramChatId.value = config.telegram_chat_id || '';
+        }
+    }
+    
+    saveConfig() {
+        localStorage.setItem('smc-config', JSON.stringify(this.config));
+    }
+    
+    showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        
+        const container = document.getElementById('toast-container');
+        container.appendChild(toast);
+        
+        // Auto remove after 3 seconds
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 3000);
+    }
+    
+    showBrowserNotification(signal) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(`SMC Signal - ${signal.symbol}`, {
+                body: `${signal.direction} @ $${this.formatPrice(signal.entry)}`,
+                icon: '/static/favicon.ico'
+            });
+        }
+    }
+}
+
+// Global functions
+function toggleTelegramConfig() {
+    const form = document.getElementById('telegram-form');
+    const chevron = document.getElementById('telegram-chevron');
+    
+    form.classList.toggle('hidden');
+    chevron.classList.toggle('fa-chevron-down');
+    chevron.classList.toggle('fa-chevron-up');
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Show temporary feedback
+        const toast = document.createElement('div');
+        toast.className = 'toast success';
+        toast.textContent = `Copied: ${text}`;
+        document.getElementById('toast-container').appendChild(toast);
+        
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 1500);
+    });
+}
+
+// Request notification permission on load
+if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+}
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', () => {
+    window.smcApp = new SMCWebInterface();
+});
