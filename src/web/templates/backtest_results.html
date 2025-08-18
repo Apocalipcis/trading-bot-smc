@@ -1,16 +1,19 @@
+<!-- Status Alert -->
+<div id="status-alert"></div>
+
 <!-- Backtest History Table -->
-<div class="table-responsive">
+                        <div class="table-responsive">
     <table class="table table-hover table-sm">
-        <thead class="table-dark">
-            <tr>
+                                <thead class="table-dark">
+                                    <tr>
                 <th><i class="bi bi-folder"></i> Type</th>
                 <th><i class="bi bi-file"></i> Name</th>
                 <th><i class="bi bi-hdd"></i> Size</th>
                 <th><i class="bi bi-clock"></i> Modified</th>
                 <th><i class="bi bi-gear"></i> Actions</th>
-            </tr>
-        </thead>
-        <tbody>
+                                    </tr>
+                                </thead>
+                                <tbody>
             <!-- Cached Data Files -->
             {% for file in cached_files %}
             <tr>
@@ -24,7 +27,7 @@
                             onclick="confirm('Delete {{ file.name }}?') && deleteFile('{{ file.name }}')">
                         <i class="bi bi-trash"></i>
                     </button>
-                </td>
+                                        </td>
             </tr>
             {% endfor %}
             
@@ -39,16 +42,16 @@
                     <button class="btn btn-sm btn-outline-primary" 
                             title="View results"
                             onclick="viewBacktestResults('{{ result.symbol }}')">
-                        <i class="bi bi-eye"></i>
-                    </button>
+                                                    <i class="bi bi-eye"></i>
+                                                </button>
                     <button class="btn btn-sm btn-outline-danger" 
                             title="Delete results"
                             onclick="confirm('Delete {{ result.symbol }} results?') && deleteBacktestResults('{{ result.symbol }}')">
                         <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            </tr>
-            {% endfor %}
+                                                </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
             
             {% if not cached_files and not backtest_results %}
             <tr>
@@ -59,9 +62,9 @@
                 </td>
             </tr>
             {% endif %}
-        </tbody>
-    </table>
-</div>
+                                </tbody>
+                            </table>
+                        </div>
 
 <!-- Summary Stats -->
 <div class="row mt-3">
@@ -71,33 +74,113 @@
                 <h5 class="card-title">Cached Files</h5>
                 <h3 class="text-primary">{{ cached_files|length }}</h3>
                 <small class="text-muted">Data files available</small>
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
     <div class="col-md-6">
-        <div class="card">
+                <div class="card">
             <div class="card-body text-center">
                 <h5 class="card-title">Backtest Results</h5>
                 <h3 class="text-success">{{ backtest_results|length }}</h3>
                 <small class="text-muted">Symbols analyzed</small>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
-</div>
 
 <script>
 function deleteFile(filename) {
-    // TODO: Implement file deletion
-    console.log('Delete file:', filename);
+    if (confirm(`Delete cached file: ${filename}?`)) {
+        fetch(`/api/backtests/data/${filename}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.text())
+        .then(html => {
+            // Show result message
+            document.getElementById('status-alert').innerHTML = html;
+            // Refresh the table
+            setTimeout(() => {
+                htmx.trigger('#backtest-history', 'refresh');
+            }, 1000);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to delete file');
+        });
+    }
 }
 
 function deleteBacktestResults(symbol) {
-    // TODO: Implement backtest results deletion
-    console.log('Delete backtest results:', symbol);
+    if (confirm(`Delete backtest results for ${symbol}?`)) {
+        fetch(`/api/backtests/results/${symbol}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.text())
+        .then(html => {
+            // Show result message
+            document.getElementById('status-alert').innerHTML = html;
+            // Refresh the table
+            setTimeout(() => {
+                htmx.trigger('#backtest-history', 'refresh');
+            }, 1000);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to delete backtest results');
+        });
+    }
 }
 
 function viewBacktestResults(symbol) {
-    // TODO: Implement results viewer
-    console.log('View results:', symbol);
+    fetch(`/api/backtests/results/${symbol}`)
+        .then(response => response.text())
+        .then(html => {
+            // Add modal to page
+            document.body.insertAdjacentHTML('beforeend', html);
+            
+            // Wait for DOM to be ready and then show modal
+                setTimeout(() => {
+                const modalElement = document.getElementById('resultsModal');
+                if (modalElement) {
+                    // Check if Bootstrap is available
+                    if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                        const modal = new bootstrap.Modal(modalElement);
+                        modal.show();
+                    } else {
+                        // Fallback: show modal manually
+                        modalElement.style.display = 'block';
+                        modalElement.classList.add('show');
+                        document.body.classList.add('modal-open');
+                        
+                        // Add backdrop
+                        const backdrop = document.createElement('div');
+                        backdrop.className = 'modal-backdrop fade show';
+                        document.body.appendChild(backdrop);
+                        
+                        // Close button functionality
+                        const closeBtn = modalElement.querySelector('.btn-close, .btn-secondary');
+                        if (closeBtn) {
+                            closeBtn.onclick = () => {
+                                modalElement.style.display = 'none';
+                                modalElement.classList.remove('show');
+                                document.body.classList.remove('modal-open');
+                                if (backdrop.parentNode) {
+                                    backdrop.parentNode.removeChild(backdrop);
+                                }
+                                if (modalElement.parentNode) {
+                                    modalElement.parentNode.removeChild(modalElement);
+                                }
+                            };
+                        }
+                    }
+                } else {
+                    console.error('Modal element not found');
+                }
+            }, 100);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to load backtest results');
+        });
 }
-</script>
+    </script>

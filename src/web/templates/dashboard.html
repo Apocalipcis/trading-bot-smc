@@ -149,6 +149,25 @@
                 </button>
                 {% endif %}
                 
+                <!-- Telegram Button -->
+                {% if telegram_enabled %}
+                <button class="btn btn-outline-warning me-2" 
+                        hx-post="/api/telegram/toggle" 
+                        hx-target="#status-alert"
+                        hx-swap="innerHTML"
+                        title="Disable Telegram notifications">
+                    <i class="bi bi-telegram"></i> Telegram ON
+                </button>
+                {% else %}
+                <button class="btn btn-outline-secondary me-2" 
+                        hx-post="/api/telegram/toggle" 
+                        hx-target="#status-alert"
+                        hx-swap="innerHTML"
+                        title="Enable Telegram notifications">
+                    <i class="bi bi-telegram"></i> Telegram OFF
+                </button>
+                {% endif %}
+                
                 <button class="btn btn-outline-light" 
                         hx-post="/api/reload-config" 
                         hx-target="#status-alert">
@@ -222,6 +241,20 @@
                 </div>
             </div>
         </div>
+
+        <!-- Telegram Test Button -->
+        {% if telegram_enabled %}
+        <div class="row mb-3">
+            <div class="col-12">
+                <button class="btn btn-outline-info btn-sm" 
+                        hx-post="/api/telegram/test" 
+                        hx-target="#status-alert"
+                        hx-swap="innerHTML">
+                    <i class="bi bi-send"></i> Send Test Message to Telegram
+                </button>
+            </div>
+        </div>
+        {% endif %}
 
         <div class="row">
             <!-- Pairs Management -->
