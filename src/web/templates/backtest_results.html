@@ -1,334 +1,103 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMC Trading Bot - Backtest Results</title>
-    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="/static/style.css" rel="stylesheet">
-    <style>
-        .result-card {
-            border-left: 4px solid #007bff;
-            transition: all 0.2s ease;
-        }
-        .result-card.profitable {
-            border-left-color: #28a745;
-        }
-        .result-card.unprofitable {
-            border-left-color: #dc3545;
-        }
-        .metric-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-        .metric-positive {
-            color: #28a745;
-        }
-        .metric-negative {
-            color: #dc3545;
-        }
-        .metric-neutral {
-            color: #6c757d;
-        }
-    </style>
-</head>
-<body>
-    <nav class="navbar navbar-dark bg-dark">
-        <div class="container-fluid">
-            <div class="d-flex align-items-center">
-                <span class="navbar-brand mb-0 h1 me-4">
-                    <i class="bi bi-graph-up"></i>
-                    SMC Trading Bot - Backtest Results
-                </span>
-                <ul class="navbar-nav d-flex flex-row">
-                    <li class="nav-item me-3">
-                        <a class="nav-link" href="/">
-                            <i class="bi bi-speedometer2"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/backtest-results">
-                            <i class="bi bi-graph-up-arrow"></i> Backtest Results
-                        </a>
-                    </li>
-                </ul>
-            </div>
-            <div class="d-flex">
-                <a href="/" class="btn btn-outline-light">
-                    <i class="bi bi-arrow-left"></i> Back to Dashboard
-                </a>
-            </div>
-        </div>
-    </nav>
-
-    <div class="container-fluid mt-4">
-        <!-- Page Header -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <h2><i class="bi bi-graph-up-arrow"></i> Backtest Results Overview</h2>
-                <p class="text-muted">Historical performance analysis for all trading pairs</p>
-            </div>
-        </div>
-
-        {% if backtest_results %}
-        <!-- Summary Cards -->
-        <div class="row mb-4">
-            {% set total_results = backtest_results|length %}
-            {% set profitable_pairs = [] %}
-            {% set total_trades = 0 %}
-            {% set total_pnl = 0 %}
-            
-            {% for symbol, result in backtest_results.items() %}
-                {% if result.get('success') and not result.get('error') %}
-                    {% set total_trades = total_trades + result.get('total_trades', 0) %}
-                    {% set total_pnl = total_pnl + result.get('total_pnl', 0) %}
-                    {% if result.get('total_pnl', 0) > 0 %}
-                        {% set _ = profitable_pairs.append(symbol) %}
-                    {% endif %}
-                {% endif %}
+<!-- Backtest History Table -->
+<div class="table-responsive">
+    <table class="table table-hover table-sm">
+        <thead class="table-dark">
+            <tr>
+                <th><i class="bi bi-folder"></i> Type</th>
+                <th><i class="bi bi-file"></i> Name</th>
+                <th><i class="bi bi-hdd"></i> Size</th>
+                <th><i class="bi bi-clock"></i> Modified</th>
+                <th><i class="bi bi-gear"></i> Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Cached Data Files -->
+            {% for file in cached_files %}
+            <tr>
+                <td><span class="badge bg-primary">Data</span></td>
+                <td><code>{{ file.name }}</code></td>
+                <td>{{ file.size }}</td>
+                <td>{{ file.modified }}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-danger" 
+                            title="Delete cached file"
+                            onclick="confirm('Delete {{ file.name }}?') && deleteFile('{{ file.name }}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
             {% endfor %}
             
-            <div class="col-md-3">
-                <div class="card bg-primary text-white">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <i class="bi bi-collection fs-2 me-3"></i>
-                            <div>
-                                <h5 class="card-title mb-0">Total Pairs</h5>
-                                <h3 class="mb-0">{{ total_results }}</h3>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Backtest Results -->
+            {% for result in backtest_results %}
+            <tr>
+                <td><span class="badge bg-success">Backtest</span></td>
+                <td><strong>{{ result.symbol }}</strong></td>
+                <td>{{ result.file_size }}</td>
+                <td>{{ result.last_run }}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" 
+                            title="View results"
+                            onclick="viewBacktestResults('{{ result.symbol }}')">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" 
+                            title="Delete results"
+                            onclick="confirm('Delete {{ result.symbol }} results?') && deleteBacktestResults('{{ result.symbol }}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
             
-            <div class="col-md-3">
-                <div class="card bg-success text-white">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <i class="bi bi-trending-up fs-2 me-3"></i>
-                            <div>
-                                <h5 class="card-title mb-0">Profitable</h5>
-                                <h3 class="mb-0">{{ profitable_pairs|length }}</h3>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-3">
-                <div class="card bg-info text-white">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <i class="bi bi-bar-chart fs-2 me-3"></i>
-                            <div>
-                                <h5 class="card-title mb-0">Total Trades</h5>
-                                <h3 class="mb-0">{{ total_trades }}</h3>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-3">
-                <div class="card bg-{{ 'success' if total_pnl > 0 else 'danger' if total_pnl < 0 else 'secondary' }} text-white">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <i class="bi bi-currency-dollar fs-2 me-3"></i>
-                            <div>
-                                <h5 class="card-title mb-0">Total P&L</h5>
-                                <h3 class="mb-0">${{ "%.2f"|format(total_pnl) }}</h3>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+            {% if not cached_files and not backtest_results %}
+            <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                    <i class="bi bi-inbox fs-3"></i>
+                    <br>No cached data or backtest results found
+                    <br><small>Use "Fetch Historical Data" to download data first</small>
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
 
-        <!-- Results Table -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="bi bi-table"></i>
-                            Detailed Backtest Results
-                        </h5>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover mb-0">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Period</th>
-                                        <th>Total Trades</th>
-                                        <th>Win Rate</th>
-                                        <th>Profit Factor</th>
-                                        <th>Total P&L</th>
-                                        <th>Avg Duration</th>
-                                        <th>Max Drawdown</th>
-                                        <th>Risk Level</th>
-                                        <th>Last Run</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for symbol, result in backtest_results.items() %}
-                                    <tr class="backtest-row">
-                                        <td>
-                                            <strong>{{ symbol }}</strong>
-                                            {% if result.get('success') %}
-                                                <i class="bi bi-check-circle text-success ms-2" title="Success"></i>
-                                            {% elif result.get('error') %}
-                                                <i class="bi bi-x-circle text-danger ms-2" title="Error"></i>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('backtest_period_days') %}
-                                                {{ result.backtest_period_days }} days
-                                            {% else %}
-                                                -
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('total_trades') is not none %}
-                                                <span class="badge bg-primary">{{ result.total_trades }}</span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('win_rate') is not none %}
-                                                {% set win_rate = result.win_rate %}
-                                                <span class="metric-value {{ 'metric-positive' if win_rate >= 50 else 'metric-negative' if win_rate < 30 else 'metric-neutral' }}">
-                                                    {{ "%.1f"|format(win_rate) }}%
-                                                </span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('profit_factor') is not none %}
-                                                {% set pf = result.profit_factor %}
-                                                <span class="metric-value {{ 'metric-positive' if pf > 1.0 else 'metric-negative' if pf < 0.8 else 'metric-neutral' }}">
-                                                    {{ "%.2f"|format(pf) }}
-                                                </span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('total_pnl') is not none %}
-                                                {% set pnl = result.total_pnl %}
-                                                <span class="metric-value {{ 'metric-positive' if pnl > 0 else 'metric-negative' if pnl < 0 else 'metric-neutral' }}">
-                                                    ${{ "%.2f"|format(pnl) }}
-                                                </span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('avg_duration_hours') is not none %}
-                                                {{ "%.1f"|format(result.avg_duration_hours) }}h
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('max_drawdown_pct') is not none %}
-                                                <span class="text-danger">{{ "%.1f"|format(result.max_drawdown_pct) }}%</span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('risk_level') %}
-                                                {% set risk = result.risk_level.upper() %}
-                                                <span class="badge bg-{{ 'success' if risk == 'LOW' else 'warning' if risk == 'MEDIUM' else 'danger' }}">
-                                                    {{ risk }}
-                                                </span>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            {% if result.get('timestamp') %}
-                                                <small class="text-muted">{{ result.timestamp[:16] }}</small>
-                                            {% else %}
-                                                <span class="text-muted">-</span>
-                                            {% endif %}
-                                        </td>
-                                        
-                                        <td>
-                                            <div class="btn-group btn-group-sm">
-                                                <button class="btn btn-outline-primary btn-sm" 
-                                                        title="View details"
-                                                        data-bs-toggle="modal" 
-                                                        data-bs-target="#detailsModal{{ loop.index }}">
-                                                    <i class="bi bi-eye"></i>
-                                                </button>
-                                                <button class="btn btn-outline-success btn-sm" 
-                                                        title="Re-run backtest"
-                                                        hx-post="/api/pairs/{{ symbol }}/run-backtest"
-                                                        hx-target="#status-alert">
-                                                    <i class="bi bi-arrow-clockwise"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
+<!-- Summary Stats -->
+<div class="row mt-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body text-center">
+                <h5 class="card-title">Cached Files</h5>
+                <h3 class="text-primary">{{ cached_files|length }}</h3>
+                <small class="text-muted">Data files available</small>
             </div>
         </div>
-        
-        {% else %}
-        <!-- No Results -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-body text-center py-5">
-                        <i class="bi bi-graph-up fs-1 text-muted mb-3"></i>
-                        <h4 class="text-muted">No Backtest Results Available</h4>
-                        <p class="text-muted">Run some backtests to see results here.</p>
-                        <a href="/" class="btn btn-primary">
-                            <i class="bi bi-arrow-left"></i> Go to Dashboard
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-        {% endif %}
     </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body text-center">
+                <h5 class="card-title">Backtest Results</h5>
+                <h3 class="text-success">{{ backtest_results|length }}</h3>
+                <small class="text-muted">Symbols analyzed</small>
+            </div>
+        </div>
+    </div>
+</div>
 
-    <!-- Status Alert -->
-    <div id="status-alert" class="position-fixed top-0 start-50 translate-middle-x mt-3" style="z-index: 9999;"></div>
+<script>
+function deleteFile(filename) {
+    // TODO: Implement file deletion
+    console.log('Delete file:', filename);
+}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Auto-hide alerts after 5 seconds
-        document.body.addEventListener('htmx:afterSwap', function(evt) {
-            if (evt.target.id === 'status-alert') {
-                setTimeout(() => {
-                    evt.target.innerHTML = '';
-                }, 5000);
-            }
-        });
-    </script>
-</body>
-</html>
+function deleteBacktestResults(symbol) {
+    // TODO: Implement backtest results deletion
+    console.log('Delete backtest results:', symbol);
+}
+
+function viewBacktestResults(symbol) {
+    // TODO: Implement results viewer
+    console.log('View results:', symbol);
+}
+</script>

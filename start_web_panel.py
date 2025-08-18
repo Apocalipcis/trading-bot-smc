@@ -24,6 +24,10 @@ if __name__ == "__main__":
     print("=" * 50)
     
     try:
+        # Set proper Python path for module imports
+        from pathlib import Path
+        current_dir = Path(__file__).parent
+        
         uvicorn.run(
             "src.web.app:app",
             host="0.0.0.0",

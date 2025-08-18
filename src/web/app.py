@@ -22,6 +22,11 @@ sys.path.append(str(project_root))
 
 from config import load_config, save_config, AppConfig, PairConfig, PairStatus
 from src.core import LiveExchangeGateway, PairManager
+from src.pre_trade_backtest import run_symbol_backtest
+from src.data_downloader import download_crypto_data
+import os
+import glob
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,8 +39,12 @@ app = FastAPI(
 )
 
 # Templates and static files
-templates = Jinja2Templates(directory="src/web/templates")
-app.mount("/static", StaticFiles(directory="src/web/static"), name="static")
+# Get proper paths relative to project root
+template_dir = project_root / "src" / "web" / "templates"
+static_dir = project_root / "src" / "web" / "static"
+
+templates = Jinja2Templates(directory=str(template_dir))
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Global state
 class BotState:
@@ -113,6 +122,7 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "config": bot_state.config,
+        "pairs": bot_state.config.pairs,  # Add this for the template
         "pair_statuses": bot_state.pair_statuses,
         "is_running": bot_state.is_running,
         "signals": bot_state.signals[:10],  # Last 10 signals
@@ -465,6 +475,170 @@ async def run_single_backtest(symbol: str, request: Request):
             "type": "error",
             "message": f"❌ Error running backtest for {symbol}: {str(e)}"
         })
+
+
+# New Backtest API endpoints
+@app.post("/api/backtests/fetch")
+async def fetch_backtest_data(
+    symbol: str = Form(...),
+    timeframe: str = Form("15m"),
+    days: int = Form(30),
+    until: Optional[str] = Form(None)
+):
+    """Fetch historical data for backtesting"""
+    try:
+        symbol = symbol.upper().strip()
+        
+        # Convert days to start/end dates
+        if until:
+            end_date = datetime.strptime(until, "%Y-%m-%d")
+        else:
+            end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        logger.info(f"Fetching {symbol} {timeframe} data from {start_date.date()} to {end_date.date()}")
+        
+        # Use existing data downloader
+        try:
+            ltf_file, htf_file = download_crypto_data(symbol, days)
+            return HTMLResponse(f"""
+                <div class="alert alert-success alert-dismissible fade show">
+                    <i class="bi bi-check-circle"></i>
+                    <strong>Success!</strong> Downloaded {symbol} data for {days} days.
+                    <br><small>Files: {ltf_file}, {htf_file}</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        except Exception as e:
+            logger.error(f"Data download failed: {e}")
+            return HTMLResponse(f"""
+                <div class="alert alert-danger alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Error!</strong> Failed to download {symbol} data: {str(e)}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+            
+    except Exception as e:
+        logger.error(f"Fetch data error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.post("/api/backtests/run")
+async def run_backtest_analysis(
+    symbol: str = Form(...),
+    timeframe: str = Form("15m"),
+    days: int = Form(30),
+    min_rr: float = Form(3.0),
+    require_fvg: bool = Form(False)
+):
+    """Run backtest analysis on cached data"""
+    try:
+        symbol = symbol.upper().strip()
+        
+        # Prepare config for backtest
+        config_dict = {
+            'min_risk_reward': min_rr,
+            'fractal_left': 2,
+            'fractal_right': 2,
+            'require_fvg_confluence': require_fvg,
+            'backtest_days': days
+        }
+        
+        logger.info(f"Running backtest for {symbol} with RR={min_rr}")
+        
+        # Run backtest using existing module
+        result = await asyncio.create_task(
+            asyncio.to_thread(run_symbol_backtest, symbol, config_dict)
+        )
+        
+        if result.get('success', False):
+            total_trades = result.get('total_trades', 0)
+            win_rate = result.get('win_rate', 0)
+            profit_factor = result.get('profit_factor', 0)
+            total_pnl = result.get('total_pnl', 0)
+            
+            return HTMLResponse(f"""
+                <div class="alert alert-success alert-dismissible fade show">
+                    <i class="bi bi-chart-line"></i>
+                    <strong>Backtest Complete!</strong> {symbol} - {total_trades} trades
+                    <br><small>Win Rate: {win_rate:.1f}% | P&L: ${total_pnl:.2f} | PF: {profit_factor:.2f}</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Backtest Failed!</strong> {symbol}: {error_msg}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+            
+    except Exception as e:
+        logger.error(f"Backtest run error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.get("/api/backtests/history")
+async def get_backtest_history(request: Request):
+    """Get list of cached data files and backtest results"""
+    try:
+        # Get data directory files
+        data_dir = Path("data")
+        backtest_dir = Path("backtest_results")
+        
+        cached_files = []
+        if data_dir.exists():
+            for file_path in data_dir.glob("*.csv"):
+                stat = file_path.stat()
+                cached_files.append({
+                    'name': file_path.name,
+                    'size': f"{stat.st_size / 1024:.1f} KB",
+                    'modified': datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                })
+        
+        # Get backtest results
+        backtest_results = []
+        if backtest_dir.exists():
+            for symbol_dir in backtest_dir.iterdir():
+                if symbol_dir.is_dir():
+                    latest_file = symbol_dir / "latest_results.json"
+                    if latest_file.exists():
+                        stat = latest_file.stat()
+                        backtest_results.append({
+                            'symbol': symbol_dir.name,
+                            'last_run': datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                            'file_size': f"{stat.st_size / 1024:.1f} KB"
+                        })
+        
+        return templates.TemplateResponse("backtest_results.html", {
+            "request": request,
+            "cached_files": cached_files,
+            "backtest_results": backtest_results
+        })
+        
+    except Exception as e:
+        logger.error(f"Backtest history error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                Error loading history: {str(e)}
+            </div>
+        """)
 
 
 if __name__ == "__main__":
