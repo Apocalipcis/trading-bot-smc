@@ -43,7 +43,7 @@ signals_history/
 signals_history_*.json
 
 # Test data (optional - uncomment if you don't want to track test data)
-# data/
+data/
 
 # IDE
 .vscode/
