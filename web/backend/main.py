@@ -304,7 +304,7 @@ async def get_status():
     """Get current bot status"""
     return {
         "is_running": bot_manager.is_running,
-        "config": bot_manager.config.dict(),
+        "config": bot_manager.config.model_dump(),
         "signals_count": len(bot_manager.signals),
         "market_data": bot_manager.market_data,
         "engines_count": len(bot_manager.engines)
@@ -319,12 +319,15 @@ async def get_signals():
 async def update_config(config: BotConfig):
     """Update bot configuration"""
     bot_manager.config = config
-    logger.info(f"Config updated: {config.dict()}")
+    logger.info(f"Config updated: {config.model_dump()}")
     return {"message": "Config updated successfully"}
 
 @app.post("/api/start")
 async def start_bot():
     """Start the trading bot"""
+    if not bot_manager.config.symbols:
+        raise HTTPException(status_code=400, detail="Cannot start bot with empty symbols list. Please add at least one trading pair.")
+    
     await bot_manager.start_engines()
     return {"message": "Bots started successfully"}
 
@@ -388,10 +391,6 @@ async def remove_symbol(symbol: str):
     symbol = symbol.upper().strip()
     
     if symbol in bot_manager.config.symbols:
-        # Don't allow removing all symbols
-        if len(bot_manager.config.symbols) <= 1:
-            return {"message": "Cannot remove the last symbol"}
-        
         bot_manager.config.symbols.remove(symbol)
         
         # Stop and remove engine if running
@@ -481,6 +480,9 @@ async def get_backtest_results(symbol: str):
 async def start_with_backtest():
     """Start trading with backtest for all symbols"""
     try:
+        if not bot_manager.config.symbols:
+            raise HTTPException(status_code=400, detail="Cannot start bot with empty symbols list. Please add at least one trading pair.")
+        
         results = {}
         
         # Run backtests for all configured symbols
@@ -536,7 +538,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "type": "initial_data",
                 "data": {
                     "signals": bot_manager.signals,
-                    "config": bot_manager.config.dict(),
+                    "config": bot_manager.config.model_dump(),
                     "status": {
                         "is_running": bot_manager.is_running,
                         "symbols": bot_manager.config.symbols,

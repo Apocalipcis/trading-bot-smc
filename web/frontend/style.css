@@ -708,3 +708,120 @@ body {
         padding: 8px 4px;
     }
 }
+
+/* Backtest Section */
+.backtest-section {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.backtest-section h4 {
+    color: #2c3e50;
+    margin-bottom: 12px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.backtest-section h4 i {
+    color: #f39c12;
+    margin-right: 8px;
+}
+
+.backtest-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.backtest-settings {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.backtest-settings label {
+    font-weight: 600;
+    color: #555;
+}
+
+.backtest-settings input[type="number"] {
+    width: 80px;
+    padding: 6px 10px;
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    font-size: 14px;
+}
+
+/* Custom Checkbox */
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #555;
+    padding: 8px 0;
+}
+
+.checkbox-container input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.checkmark {
+    height: 20px;
+    width: 20px;
+    background-color: #fff;
+    border: 2px solid #3498db;
+    border-radius: 4px;
+    margin-right: 10px;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.checkbox-container:hover input ~ .checkmark {
+    background-color: #f8f9fa;
+    border-color: #2980b9;
+}
+
+.checkbox-container input:checked ~ .checkmark {
+    background-color: #3498db;
+    border-color: #3498db;
+}
+
+.checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+    left: 6px;
+    top: 2px;
+    width: 6px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.checkbox-container input:checked ~ .checkmark:after {
+    display: block;
+}
+
+/* Responsive Design for Backtest Section */
+@media (max-width: 768px) {
+    .backtest-settings {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .backtest-settings input[type="number"] {
+        width: 100%;
+        max-width: 150px;
+    }
+}

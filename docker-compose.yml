@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # Web Interface (All-in-One)
+  smc-web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: smc-web
+    ports:
+      - "8000:8000"  # Web interface
+      - "8001:8001"  # WebSocket for live trading
+    volumes:
+      - ./data:/app/data
+      - ./backtest_results:/app/backtest_results
+      - ./signals_history:/app/signals_history
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    restart: unless-stopped
+
+    networks:
+      - smc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for caching (if needed later)
+  # redis:
+  #   image: redis:alpine
+  #   container_name: smc-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+  #   networks:
+  #     - smc-network
+
+networks:
+  smc-network:
+    driver: bridge
+
+volumes:
+  signals_history:
