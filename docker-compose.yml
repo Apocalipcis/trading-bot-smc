@@ -1,25 +1,7 @@
 version: '3.8'
 
 services:
-  # Main SMC Trading Bot (Console/CLI)
-  smc-trading-bot:
-    build: .
-    container_name: smc-trading-bot
-    ports:
-      - "8001:8001"  # WebSocket for live trading
-    volumes:
-      - ./data:/app/data
-      - ./backtest_results:/app/backtest_results
-      - ./logs:/app/logs
-      - ./.env:/app/.env:ro
-    environment:
-      - PYTHONPATH=/app/src
-      - PYTHONUNBUFFERED=1
-    restart: unless-stopped
-    networks:
-      - smc-network
-
-  # Web Interface
+  # Web Interface (All-in-One)
   smc-web:
     build:
       context: .
@@ -27,6 +9,7 @@ services:
     container_name: smc-web
     ports:
       - "8000:8000"  # Web interface
+      - "8001:8001"  # WebSocket for live trading
     volumes:
       - ./data:/app/data
       - ./backtest_results:/app/backtest_results
@@ -38,8 +21,7 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     restart: unless-stopped
-    depends_on:
-      - smc-trading-bot
+
     networks:
       - smc-network
     healthcheck:

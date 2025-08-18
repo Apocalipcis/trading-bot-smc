@@ -19,6 +19,7 @@ class SMCWebInterface {
         this.bindEvents();
         this.connectWebSocket();
         this.loadConfig();
+        this.loadSettings();
     }
     
     initializeElements() {
@@ -30,6 +31,11 @@ class SMCWebInterface {
         this.stopBtn = document.getElementById('stop-btn');
         this.clearBtn = document.getElementById('clear-btn');
         this.testAlertBtn = document.getElementById('test-alert-btn');
+        
+        // Backtest elements
+        this.autoBacktestCheckbox = document.getElementById('auto-backtest');
+        this.backtestDaysInput = document.getElementById('backtest-days');
+        this.runBacktestBtn = document.getElementById('run-backtest-btn');
         
         // Status elements
         this.statusText = document.getElementById('status-text');
@@ -62,6 +68,10 @@ class SMCWebInterface {
         this.stopBtn.addEventListener('click', () => this.stopBot());
         this.clearBtn.addEventListener('click', () => this.clearSignals());
         this.testAlertBtn.addEventListener('click', () => this.sendTestAlert());
+        
+        // Backtest events
+        this.runBacktestBtn.addEventListener('click', () => this.runBacktest());
+        this.autoBacktestCheckbox.addEventListener('change', () => this.saveSettings());
         
         // Symbol management
         this.addSymbolBtn.addEventListener('click', () => this.addSymbol());
@@ -375,13 +385,38 @@ class SMCWebInterface {
     async startBot() {
         try {
             await this.updateConfig();
-            const response = await fetch('/api/start', { method: 'POST' });
-            const data = await response.json();
             
-            if (response.ok) {
-                this.showToast('Bot started successfully', 'success');
+            // Check if auto-backtest is enabled
+            const autoBacktest = this.autoBacktestCheckbox.checked;
+            
+            if (autoBacktest) {
+                this.showToast('Running backtest before starting...', 'info');
+                
+                const backtestResponse = await fetch('/api/start-with-backtest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const backtestData = await backtestResponse.json();
+                
+                if (backtestResponse.ok) {
+                    this.showToast('Bot started with backtest successfully!', 'success');
+                    
+                    // Show backtest results
+                    if (backtestData.backtest_results) {
+                        this.displayBacktestResults(backtestData.backtest_results);
+                    }
+                } else {
+                    throw new Error(backtestData.detail || 'Failed to start bot with backtest');
+                }
             } else {
-                throw new Error(data.detail || 'Failed to start bot');
+                const response = await fetch('/api/start', { method: 'POST' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    this.showToast('Bot started successfully', 'success');
+                } else {
+                    throw new Error(data.detail || 'Failed to start bot');
+                }
             }
         } catch (error) {
             this.showToast(`Error starting bot: ${error.message}`, 'error');
@@ -443,11 +478,6 @@ class SMCWebInterface {
         const index = this.config.symbols.indexOf(symbol);
         if (index > -1) {
             this.config.symbols.splice(index, 1);
-            
-            // Don't allow removing all symbols
-            if (this.config.symbols.length === 0) {
-                this.config.symbols = ['ETHUSDT'];
-            }
             
             this.updateConfig();
             this.updatePairsList();
@@ -605,6 +635,128 @@ class SMCWebInterface {
         if (this.heartbeatInterval) {
             clearInterval(this.heartbeatInterval);
             this.heartbeatInterval = null;
+        }
+    }
+    
+    // Backtest methods
+    async runBacktest() {
+        try {
+            const days = parseInt(this.backtestDaysInput.value) || 30;
+            this.showToast(`Running backtest for ${days} days...`, 'info');
+            
+            // Run backtest for all symbols
+            const promises = this.config.symbols.map(async (symbol) => {
+                const response = await fetch(`/api/backtest/${symbol}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    return { symbol, success: true, data: await response.json() };
+                } else {
+                    return { symbol, success: false, error: await response.text() };
+                }
+            });
+            
+            const results = await Promise.all(promises);
+            
+            // Display results
+            this.displayBacktestResults(results);
+            this.showToast('Backtest completed!', 'success');
+            
+        } catch (error) {
+            this.showToast(`Error running backtest: ${error.message}`, 'error');
+        }
+    }
+    
+    displayBacktestResults(results) {
+        // Create a simple popup/modal to show backtest results
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); z-index: 1000;
+            display: flex; align-items: center; justify-content: center;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = `
+            background: white; padding: 20px; border-radius: 10px;
+            max-width: 600px; max-height: 70vh; overflow-y: auto;
+        `;
+        
+        let html = '<h3>📊 Backtest Results</h3>';
+        
+        if (Array.isArray(results)) {
+            results.forEach(result => {
+                if (result.success) {
+                    const data = result.data;
+                    html += `
+                        <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                            <h4>${result.symbol}</h4>
+                            <p><strong>Total Trades:</strong> ${data.total_trades || 'N/A'}</p>
+                            <p><strong>Win Rate:</strong> ${data.win_rate || 'N/A'}%</p>
+                            <p><strong>Profit Factor:</strong> ${data.profit_factor || 'N/A'}</p>
+                            <p><strong>Total P&L:</strong> ${data.total_pnl || 'N/A'}</p>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div style="margin: 10px 0; padding: 10px; border: 1px solid #f00; border-radius: 5px;">
+                            <h4>${result.symbol} - Error</h4>
+                            <p style="color: red;">${result.error}</p>
+                        </div>
+                    `;
+                }
+            });
+        } else {
+            // Single result object
+            Object.keys(results).forEach(symbol => {
+                const data = results[symbol];
+                html += `
+                    <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        <h4>${symbol}</h4>
+                        <p><strong>Total Trades:</strong> ${data.total_trades || 'N/A'}</p>
+                        <p><strong>Win Rate:</strong> ${data.win_rate || 'N/A'}%</p>
+                        <p><strong>Profit Factor:</strong> ${data.profit_factor || 'N/A'}</p>
+                        <p><strong>Total P&L:</strong> ${data.total_pnl || 'N/A'}</p>
+                    </div>
+                `;
+            });
+        }
+        
+        html += '<button onclick="this.parentElement.parentElement.remove()" style="margin-top: 15px; padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">Close</button>';
+        
+        content.innerHTML = html;
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+        
+        // Close on backdrop click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+    }
+    
+    saveSettings() {
+        // Save settings to localStorage
+        const settings = {
+            autoBacktest: this.autoBacktestCheckbox.checked,
+            backtestDays: parseInt(this.backtestDaysInput.value) || 30
+        };
+        localStorage.setItem('smcBotSettings', JSON.stringify(settings));
+    }
+    
+    loadSettings() {
+        // Load settings from localStorage
+        const settings = JSON.parse(localStorage.getItem('smcBotSettings') || '{}');
+        
+        if (settings.autoBacktest !== undefined) {
+            this.autoBacktestCheckbox.checked = settings.autoBacktest;
+        }
+        
+        if (settings.backtestDays) {
+            this.backtestDaysInput.value = settings.backtestDays;
         }
     }
 }

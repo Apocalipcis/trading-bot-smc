@@ -69,32 +69,19 @@ def stop_services():
 
 def view_logs():
     """View container logs"""
-    print("\n📋 Available services:")
-    print("1. smc-trading-bot (Console/CLI)")
-    print("2. smc-web (Web Interface)")
-    print("3. All services")
-    
-    choice = input("Choose service to view logs (1-3): ").strip()
-    
-    if choice == "1":
-        return run_command("docker-compose logs -f smc-trading-bot", "Viewing trading bot logs")
-    elif choice == "2":
-        return run_command("docker-compose logs -f smc-web", "Viewing web interface logs")
-    elif choice == "3":
-        return run_command("docker-compose logs -f", "Viewing all logs")
-    else:
-        print("❌ Invalid choice!")
-        return False
+    return run_command("docker-compose logs -f smc-web", "Viewing web interface logs")
 
 def run_backtest(symbol, days=30):
-    """Run backtest for specific symbol in container"""
-    cmd = f'docker exec -it smc-trading-bot python live_trading.py --symbol {symbol} --run-backtest --backtest-days {days}'
-    return run_command(cmd, f"Running backtest for {symbol}")
+    """Run backtest for specific symbol via API"""
+    print(f"🔍 Running backtest for {symbol} via web API...")
+    print(f"📊 Results will be available at: http://localhost:8000")
+    return run_command(f'curl -X POST "http://localhost:8000/api/backtest/{symbol}"', f"Running backtest for {symbol}")
 
 def run_live_trading(symbol, rr=3.0, interval=45):
-    """Run live trading for specific symbol in container"""
-    cmd = f'docker exec -it smc-trading-bot python live_trading.py --symbol {symbol} --rr {rr} --status-check-interval {interval} --desktop-alerts'
-    return run_command(cmd, f"Starting live trading for {symbol}")
+    """Start live trading via web API"""
+    print(f"🚀 Starting live trading for {symbol} via web interface...")
+    print(f"📊 Monitor at: http://localhost:8000")
+    return run_command(f'curl -X POST "http://localhost:8000/api/start"', f"Starting live trading for {symbol}")
 
 def show_status():
     """Show container status"""

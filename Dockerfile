@@ -29,5 +29,5 @@ ENV PYTHONUNBUFFERED=1
 # Expose ports for web interface
 EXPOSE 8000 8001
 
-# Default command
-CMD ["python", "live_trading.py", "--help"]
+# Default command - keep container running
+CMD ["tail", "-f", "/dev/null"]
