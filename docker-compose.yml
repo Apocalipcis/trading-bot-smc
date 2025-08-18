@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  smc-trading-bot:
+    build: .
+    container_name: smc-trading-bot
+    ports:
+      - "8000:8000"  # Web interface
+      - "8001:8001"  # WebSocket
+    volumes:
+      - ./data:/app/data
+      - ./backtest_results:/app/backtest_results
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONPATH=/app/src
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - smc-network
+
+  # Optional: Redis for caching (if needed later)
+  # redis:
+  #   image: redis:alpine
+  #   container_name: smc-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+  #   networks:
+  #     - smc-network
+
+networks:
+  smc-network:
+    driver: bridge
+
+# volumes:
+#   redis_data:
