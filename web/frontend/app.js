@@ -106,6 +106,9 @@ class SMCWebInterface {
             this.isConnected = true;
             this.updateConnectionStatus(true);
             this.showToast('Connected to SMC Bot', 'success');
+            
+            // Start heartbeat
+            this.startHeartbeat();
         };
         
         this.ws.onmessage = (event) => {
@@ -116,14 +119,16 @@ class SMCWebInterface {
         this.ws.onclose = () => {
             this.isConnected = false;
             this.updateConnectionStatus(false);
+            this.stopHeartbeat();
             this.showToast('Disconnected from SMC Bot', 'error');
             
-            // Attempt to reconnect after 3 seconds
+            // Attempt to reconnect after 5 seconds with backoff
             setTimeout(() => {
                 if (!this.isConnected) {
+                    console.log('Attempting to reconnect...');
                     this.connectWebSocket();
                 }
-            }, 3000);
+            }, 5000);
         };
         
         this.ws.onerror = (error) => {
@@ -153,7 +158,8 @@ class SMCWebInterface {
                 break;
                 
             case 'heartbeat':
-                // Keep alive
+            case 'pong':
+                // Keep alive - connection is good
                 break;
                 
             default:
@@ -578,6 +584,27 @@ class SMCWebInterface {
                 body: `${signal.direction} @ $${this.formatPrice(signal.entry)}`,
                 icon: '/static/favicon.ico'
             });
+        }
+    }
+    
+    startHeartbeat() {
+        // Clear existing heartbeat
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+        }
+        
+        // Send ping every 25 seconds
+        this.heartbeatInterval = setInterval(() => {
+            if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 25000);
+    }
+    
+    stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
         }
     }
 }

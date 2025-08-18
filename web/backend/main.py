@@ -106,28 +106,37 @@ class BotManager:
             
             # Create Telegram client if configured
             if self.config.telegram_token and self.config.telegram_chat_id:
-                self.telegram_client = TelegramClient(
-                    self.config.telegram_token,
-                    self.config.telegram_chat_id
-                )
+                try:
+                    self.telegram_client = TelegramClient(
+                        self.config.telegram_token,
+                        self.config.telegram_chat_id
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create Telegram client: {e}")
+                    self.telegram_client = None
             
             # Create and start engines for each symbol
             for symbol in self.config.symbols:
                 if symbol not in self.engines:
-                    engine = LiveSMCEngine(symbol, config_dict)
-                    engine.add_signal_callback(self._on_new_signal)
-                    engine.add_update_callback(lambda tf, data, sym=symbol: self._on_data_update(sym, tf, data))
-                    
-                    # Start engine in background
-                    asyncio.create_task(engine.start())
-                    self.engines[symbol] = engine
-                    
-                    # Initialize market data for this symbol
-                    self.market_data[symbol] = {
-                        'current_price': 0.0,
-                        'htf_bias': 'neutral',
-                        'status': 'starting'
-                    }
+                    try:
+                        engine = LiveSMCEngine(symbol, config_dict)
+                        engine.add_signal_callback(self._on_new_signal)
+                        engine.add_update_callback(lambda tf, data, sym=symbol: self._on_data_update(sym, tf, data))
+                        
+                        # Start engine in background
+                        asyncio.create_task(engine.start())
+                        self.engines[symbol] = engine
+                        
+                        # Initialize market data for this symbol
+                        self.market_data[symbol] = {
+                            'current_price': 0.0,
+                            'htf_bias': 'neutral',
+                            'status': 'starting'
+                        }
+                        logger.info(f"Started engine for {symbol}")
+                    except Exception as e:
+                        logger.error(f"Failed to start engine for {symbol}: {e}")
+                        continue
             
             self.is_running = True
             
@@ -142,7 +151,11 @@ class BotManager:
         """Stop all SMC engines"""
         for symbol, engine in self.engines.items():
             if engine:
-                await engine.stop()
+                try:
+                    await engine.stop()
+                    logger.info(f"Stopped engine for {symbol}")
+                except Exception as e:
+                    logger.error(f"Error stopping engine for {symbol}: {e}")
         
         self.engines.clear()
         self.market_data.clear()
@@ -229,12 +242,14 @@ class BotManager:
             for websocket in self.websocket_connections:
                 try:
                     await websocket.send_text(json.dumps(message))
-                except:
+                except Exception as e:
+                    logger.debug(f"WebSocket send failed: {e}")
                     disconnected.append(websocket)
             
             # Remove disconnected clients
             for ws in disconnected:
-                self.websocket_connections.remove(ws)
+                if ws in self.websocket_connections:
+                    self.websocket_connections.remove(ws)
 
 # Global bot manager instance
 bot_manager = BotManager()
@@ -393,33 +408,46 @@ async def send_test_alert(signal: dict):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates"""
-    await websocket.accept()
-    bot_manager.websocket_connections.append(websocket)
-    
     try:
+        await websocket.accept()
+        bot_manager.websocket_connections.append(websocket)
+        logger.info("WebSocket client connected")
+        
         # Send initial data
-        await websocket.send_text(json.dumps({
-            "type": "initial_data",
-            "data": {
-                "signals": bot_manager.signals,
-                "config": bot_manager.config.dict(),
-                "status": {
-                    "is_running": bot_manager.is_running,
-                    "symbols": bot_manager.config.symbols,
-                    "market_data": bot_manager.market_data,
-                    "engines_count": len(bot_manager.engines)
+        try:
+            initial_data = {
+                "type": "initial_data",
+                "data": {
+                    "signals": bot_manager.signals,
+                    "config": bot_manager.config.dict(),
+                    "status": {
+                        "is_running": bot_manager.is_running,
+                        "symbols": bot_manager.config.symbols,
+                        "market_data": bot_manager.market_data,
+                        "engines_count": len(bot_manager.engines)
+                    }
                 }
             }
-        }))
+            await websocket.send_text(json.dumps(initial_data))
+        except Exception as e:
+            logger.error(f"Failed to send initial data: {e}")
         
         # Keep connection alive
         while True:
-            # Wait for ping from client or send heartbeat
             try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # Wait for ping from client or send heartbeat
+                message = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # Echo back any received message as heartbeat
+                await websocket.send_text(json.dumps({"type": "pong", "data": "alive"}))
             except asyncio.TimeoutError:
                 # Send heartbeat
-                await websocket.send_text(json.dumps({"type": "heartbeat"}))
+                try:
+                    await websocket.send_text(json.dumps({"type": "heartbeat"}))
+                except Exception:
+                    break  # Connection is dead
+            except Exception as e:
+                logger.debug(f"WebSocket receive error: {e}")
+                break
                 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")
@@ -428,6 +456,7 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         if websocket in bot_manager.websocket_connections:
             bot_manager.websocket_connections.remove(websocket)
+            logger.info("WebSocket client removed from connections")
 
 if __name__ == "__main__":
     import uvicorn
