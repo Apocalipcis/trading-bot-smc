@@ -104,7 +104,11 @@ class SMCStrategy(Strategy):
             })
         
         df = pd.DataFrame(data)
-        df.set_index('timestamp', inplace=True)
+        
+        # Ensure timestamp column is properly formatted as pandas datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        # Keep numeric index for SMC functions compatibility
+        # df.set_index('timestamp', inplace=True)  # Commented out to preserve numeric indices
         
         # Ensure all numeric columns are float64
         for col in ['open', 'high', 'low', 'close', 'volume']:

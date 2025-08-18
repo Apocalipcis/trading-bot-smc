@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -298,6 +298,74 @@ async def toggle_pair_backtest(symbol: str, backtest_enabled: bool = Form(...)):
         """)
 
 
+@app.post("/api/pairs/{symbol}/test-signal")
+async def generate_test_signal(symbol: str):
+    """Generate a test signal for the specified pair"""
+    try:
+        symbol = symbol.upper()
+        
+        # Find pair in config
+        pair_config = bot_state.config.get_pair_config(symbol)
+        if not pair_config:
+            raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
+        
+        # Create a test signal
+        from datetime import datetime
+        from config.models import Signal
+        
+        # Generate random direction and price for testing
+        import random
+        direction = random.choice(['LONG', 'SHORT'])
+        current_price = 100.0  # Default price for testing
+        
+        # Create test signal
+        test_signal = Signal(
+            timestamp=datetime.now(),
+            symbol=symbol,
+            direction=direction,
+            entry=current_price,
+            stop_loss=current_price * 0.95 if direction == 'LONG' else current_price * 1.05,
+            take_profit=current_price * 1.15 if direction == 'LONG' else current_price * 0.85,
+            risk_reward=3.0,
+            htf_bias='bull' if direction == 'LONG' else 'bear',
+            fvg_confluence=True,
+            confidence='high',
+            strategy='test'
+        )
+        
+        # Add to signals list
+        bot_state.signals.insert(0, test_signal.to_dict())
+        # Keep only last 50 signals
+        bot_state.signals = bot_state.signals[:50]
+        
+        logger.info(f"Generated test signal for {symbol}: {direction} at {current_price}")
+        
+        # Return success message with signal refresh trigger
+        return HTMLResponse(f"""
+            <div class="alert alert-info alert-dismissible fade show" role="alert">
+                <i class="bi bi-lightning"></i>
+                <strong>Test Signal Generated!</strong> {symbol} {direction} at ${current_price:.2f}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <script>
+                // Trigger signals list refresh after a short delay
+                setTimeout(() => {{
+                    htmx.trigger('#signals-list', 'load');
+                }}, 500);
+            </script>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error generating test signal for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to generate test signal for {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
 @app.post("/api/pairs/add")
 async def add_pair(symbol: str = Form(...), timeframe: str = Form("15m"), strategy: str = Form("smc_v1"), min_risk_reward: float = Form(3.0)):
     """Add new trading pair"""
@@ -337,7 +405,7 @@ async def add_pair(symbol: str = Form(...), timeframe: str = Form("15m"), strate
             await bot_state.pair_manager.apply_config(bot_state.config)
         
         logger.info(f"Added new pair: {symbol}")
-        return {"success": True, "symbol": symbol}
+        return JSONResponse({"success": True, "symbol": symbol})
         
     except HTTPException:
         raise
@@ -368,13 +436,141 @@ async def remove_pair(symbol: str):
             await bot_state.pair_manager.apply_config(bot_state.config)
         
         logger.info(f"Removed pair: {symbol}")
-        return {"success": True, "symbol": symbol}
+        return JSONResponse({"success": True, "symbol": symbol})
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error removing pair {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/pairs/{symbol}/run-backtest")
+async def run_pair_backtest(symbol: str):
+    """Run backtest for the specified pair"""
+    try:
+        symbol = symbol.upper()
+        
+        # Find pair in config
+        pair_config = bot_state.config.get_pair_config(symbol)
+        if not pair_config:
+            raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
+        
+        # Check if backtest is already running
+        if bot_state.pair_statuses.get(symbol) and bot_state.pair_statuses[symbol].backtest_running:
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning!</strong> Backtest for {symbol} is already running
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        
+        # Import backtest function
+        from src.pre_trade_backtest import run_symbol_backtest
+        
+        # Build config dict for backtest
+        config_dict = {
+            'min_risk_reward': pair_config.min_risk_reward,
+            'fractal_left': pair_config.fractal_left,
+            'fractal_right': pair_config.fractal_right,
+            'backtest_days': 30,
+            'ltf_timeframe': getattr(pair_config, 'timeframe', '15m'),
+            'htf_timeframe': '4h'
+        }
+        
+        # Run backtest in background thread and reflect running status in UI
+        import asyncio
+        async def _run_and_flag():
+            try:
+                # Mark as running in UI if we have a status entry
+                status = bot_state.pair_statuses.get(symbol)
+                if status:
+                    status.backtest_running = True
+                await asyncio.to_thread(run_symbol_backtest, symbol, config_dict)
+            finally:
+                status = bot_state.pair_statuses.get(symbol)
+                if status:
+                    status.backtest_running = False
+        
+        asyncio.create_task(_run_and_flag())
+        
+        logger.info(f"Started backtest for {symbol}")
+        
+        # Return success message
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> Started backtest for {symbol}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <script>
+                // Trigger pairs table refresh after a short delay
+                setTimeout(() => {{
+                    htmx.trigger('#pairs-table', 'load');
+                }}, 500);
+            </script>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error starting backtest for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to start backtest for {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.post("/api/pairs/{symbol}/toggle-backtest-status")
+async def toggle_pair_backtest_status(symbol: str):
+    """Toggle backtest enabled status for a pair"""
+    try:
+        symbol = symbol.upper()
+        
+        # Find and update pair in config
+        pair_config = bot_state.config.get_pair_config(symbol)
+        if not pair_config:
+            raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
+        
+        # Toggle backtest status
+        pair_config.backtest_enabled = not pair_config.backtest_enabled
+        
+        # Save config
+        save_config(bot_state.config)
+        
+        # Apply hot reload if bot is running
+        if bot_state.pair_manager and bot_state.is_running:
+            await bot_state.pair_manager.apply_config(bot_state.config)
+        
+        status_text = "enabled" if pair_config.backtest_enabled else "disabled"
+        logger.info(f"Toggled {symbol} backtest: {status_text}")
+        
+        # Return HTML fragment instead of JSON for HTMX
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> {symbol} backtest {status_text}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <script>
+                // Trigger pairs table refresh after a short delay
+                setTimeout(() => {{
+                    htmx.trigger('#pairs-table', 'load');
+                }}, 500);
+            </script>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error toggling {symbol} backtest status: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to toggle {symbol} backtest: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 @app.post("/api/start")

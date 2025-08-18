@@ -102,7 +102,9 @@ class BacktestValidator:
                 
                 # Check SL first (more conservative)
                 if low <= sl_price:
-                    duration = int((candle['timestamp'] - entry_time).total_seconds() / 60)
+                    # Ensure both timestamps are pandas Timestamps for proper arithmetic
+                    candle_timestamp = pd.to_datetime(candle['timestamp'])
+                    duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = sl_price - entry_price
                     return TradeResult(
                         timestamp=signal['timestamp'],
@@ -121,7 +123,9 @@ class BacktestValidator:
                 
                 # Check TP
                 if high >= tp_price:
-                    duration = int((candle['timestamp'] - entry_time).total_seconds() / 60)
+                    # Ensure both timestamps are pandas Timestamps for proper arithmetic
+                    candle_timestamp = pd.to_datetime(candle['timestamp'])
+                    duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = tp_price - entry_price
                     return TradeResult(
                         timestamp=signal['timestamp'],
@@ -145,7 +149,9 @@ class BacktestValidator:
                 
                 # Check SL first
                 if high >= sl_price:
-                    duration = int((candle['timestamp'] - entry_time).total_seconds() / 60)
+                    # Ensure both timestamps are pandas Timestamps for proper arithmetic
+                    candle_timestamp = pd.to_datetime(candle['timestamp'])
+                    duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = entry_price - sl_price
                     return TradeResult(
                         timestamp=signal['timestamp'],
@@ -164,7 +170,9 @@ class BacktestValidator:
                 
                 # Check TP
                 if low <= tp_price:
-                    duration = int((candle['timestamp'] - entry_time).total_seconds() / 60)
+                    # Ensure both timestamps are pandas Timestamps for proper arithmetic
+                    candle_timestamp = pd.to_datetime(candle['timestamp'])
+                    duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = entry_price - tp_price
                     return TradeResult(
                         timestamp=signal['timestamp'],
@@ -184,7 +192,9 @@ class BacktestValidator:
         # No exit found - still running
         final_candle = self.price_data.iloc[-1]
         final_price = float(final_candle['close'])
-        duration = int((final_candle['timestamp'] - entry_time).total_seconds() / 60)
+        # Ensure both timestamps are pandas Timestamps for proper arithmetic
+        final_timestamp = pd.to_datetime(final_candle['timestamp'])
+        duration = int((final_timestamp - entry_time).total_seconds() / 60)
         
         if direction == 'LONG':
             pnl = final_price - entry_price
