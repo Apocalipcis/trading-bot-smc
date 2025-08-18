@@ -1,0 +1,7 @@
+<!-- Alert template for HTMX responses -->
+{% if type and message %}
+<div class="alert alert-{{ 'success' if type == 'success' else 'danger' if type == 'error' else 'info' if type == 'info' else 'warning' }} alert-dismissible fade show" role="alert">
+    {{ message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}

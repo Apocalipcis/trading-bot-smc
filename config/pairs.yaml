@@ -1,0 +1,46 @@
+max_concurrent_pairs: 10
+telegram_token: null
+telegram_chat_id: null
+log_level: INFO
+binance_requests_per_minute: 1200
+backtest_concurrent_limit: 2
+data_dir: data
+logs_dir: logs
+backtest_results_dir: backtest_results
+pairs:
+- symbol: BTCUSDT
+  enabled: true
+  backtest_enabled: false
+  timeframe: 15m
+  strategy: smc_v1
+  min_risk_reward: 3.0
+  fractal_left: 2
+  fractal_right: 2
+  max_risk_per_trade: 0.02
+- symbol: ETHUSDT
+  enabled: true
+  backtest_enabled: true
+  timeframe: 15m
+  strategy: smc_v1
+  min_risk_reward: 3.0
+  fractal_left: 2
+  fractal_right: 2
+  max_risk_per_trade: 0.02
+- symbol: SOLUSDT
+  enabled: false
+  backtest_enabled: true
+  timeframe: 15m
+  strategy: smc_v1
+  min_risk_reward: 3.0
+  fractal_left: 2
+  fractal_right: 2
+  max_risk_per_trade: 0.02
+- symbol: BNBUSDT
+  enabled: false
+  backtest_enabled: false
+  timeframe: 15m
+  strategy: smc_v1
+  min_risk_reward: 3.0
+  fractal_left: 2
+  fractal_right: 2
+  max_risk_per_trade: 0.02

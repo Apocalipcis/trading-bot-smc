@@ -1,0 +1,175 @@
+<!-- Pairs Management Table -->
+<div class="table-responsive">
+    <table class="table table-hover mb-0">
+        <thead class="table-dark">
+            <tr>
+                <th>Symbol</th>
+                <th>Live Trading</th>
+                <th>Backtest</th>
+                <th>Status</th>
+                <th>Price</th>
+                <th>Bias</th>
+                <th>Signals</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pair in config.pairs %}
+            {% set status = pair_statuses.get(pair.symbol) %}
+            <tr class="pair-row" data-symbol="{{ pair.symbol }}">
+                <td>
+                    <strong>{{ pair.symbol }}</strong>
+                    <br>
+                    <small class="text-muted">{{ pair.timeframe }} • {{ pair.strategy }}</small>
+                </td>
+                
+                <!-- Live Trading Toggle -->
+                <td>
+                    <label class="toggle-switch">
+                        <input type="checkbox" 
+                               {% if pair.enabled %}checked{% endif %}
+                               {% if is_running %}disabled{% endif %}
+                               hx-post="/api/pairs/{{ pair.symbol }}/toggle-enabled"
+                               hx-vals='{"enabled": {% if pair.enabled %}false{% else %}true{% endif %}}'
+                               hx-target="#pairs-table"
+                               hx-swap="outerHTML">
+                        <span class="slider"></span>
+                    </label>
+                    {% if pair.enabled %}
+                        <small class="text-success d-block">Enabled</small>
+                    {% else %}
+                        <small class="text-muted d-block">Disabled</small>
+                    {% endif %}
+                </td>
+                
+                <!-- Backtest Toggle -->
+                <td>
+                    <label class="toggle-switch">
+                        <input type="checkbox" 
+                               {% if pair.backtest_enabled %}checked{% endif %}
+                               hx-post="/api/pairs/{{ pair.symbol }}/toggle-backtest"
+                               hx-vals='{"backtest_enabled": {% if pair.backtest_enabled %}false{% else %}true{% endif %}}'
+                               hx-target="#pairs-table"
+                               hx-swap="outerHTML">
+                        <span class="slider"></span>
+                    </label>
+                    {% if pair.backtest_enabled %}
+                        <small class="text-info d-block">Active</small>
+                    {% else %}
+                        <small class="text-muted d-block">Inactive</small>
+                    {% endif %}
+                </td>
+                
+                <!-- Status -->
+                <td>
+                    {% if status %}
+                        <span class="status-indicator status-{{ status.status }}"></span>
+                        <span class="badge bg-{{ 'success' if status.status == 'running' else 'warning' if status.status == 'starting' else 'secondary' }}">
+                            {{ status.status.title() }}
+                        </span>
+                        {% if status.backtest_running %}
+                            <br><small class="text-info"><i class="bi bi-graph-up"></i> Backtesting...</small>
+                        {% endif %}
+                        {% if status.websocket_connected %}
+                            <br><small class="text-success"><i class="bi bi-wifi"></i> Connected</small>
+                        {% endif %}
+                    {% else %}
+                        <span class="status-indicator status-stopped"></span>
+                        <span class="badge bg-secondary">Stopped</span>
+                    {% endif %}
+                </td>
+                
+                <!-- Current Price -->
+                <td>
+                    {% if status and status.current_price %}
+                        <strong>${{ "%.2f"|format(status.current_price) }}</strong>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                
+                <!-- HTF Bias -->
+                <td>
+                    {% if status and status.htf_bias %}
+                        {% set bias_color = 'success' if status.htf_bias == 'bull' else 'danger' if status.htf_bias == 'bear' else 'secondary' %}
+                        <span class="badge bg-{{ bias_color }}">
+                            {% if status.htf_bias == 'bull' %}
+                                <i class="bi bi-arrow-up"></i> Bull
+                            {% elif status.htf_bias == 'bear' %}
+                                <i class="bi bi-arrow-down"></i> Bear
+                            {% else %}
+                                <i class="bi bi-dash"></i> Neutral
+                            {% endif %}
+                        </span>
+                    {% else %}
+                        <span class="badge bg-secondary">
+                            <i class="bi bi-dash"></i> Neutral
+                        </span>
+                    {% endif %}
+                </td>
+                
+                <!-- Active Signals -->
+                <td>
+                    {% if status and status.active_signals > 0 %}
+                        <span class="badge bg-primary">{{ status.active_signals }}</span>
+                        {% if status.last_signal_time %}
+                            <br><small class="text-muted">{{ status.last_signal_time[:16] }}</small>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">0</span>
+                    {% endif %}
+                </td>
+                
+                <!-- Actions -->
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <!-- Remove button -->
+                        <button class="btn btn-outline-danger btn-sm" 
+                                hx-delete="/api/pairs/{{ pair.symbol }}"
+                                hx-target="#pairs-table"
+                                hx-swap="outerHTML"
+                                hx-confirm="Are you sure you want to remove {{ pair.symbol }}?"
+                                title="Remove pair">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        
+                        <!-- Settings button -->
+                        <button class="btn btn-outline-secondary btn-sm" 
+                                title="Pair settings">
+                            <i class="bi bi-gear"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            
+            {% if config.pairs|length == 0 %}
+            <tr>
+                <td colspan="8" class="text-center text-muted py-4">
+                    <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                    No trading pairs configured. Click "Add Pair" to get started.
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% if config.pairs|length > 0 %}
+<div class="card-footer text-muted">
+    <div class="row">
+        <div class="col-md-6">
+            <small>
+                <i class="bi bi-info-circle"></i>
+                {{ config.pairs|length }} total pairs • Max concurrent: {{ config.max_concurrent_pairs }}
+            </small>
+        </div>
+        <div class="col-md-6 text-end">
+            <small>
+                <i class="bi bi-clock"></i>
+                Last updated: {{ moment().format('HH:mm:ss') if moment else 'now' }}
+            </small>
+        </div>
+    </div>
+</div>
+{% endif %}
