@@ -14,6 +14,7 @@ services:
       - ./data:/app/data
       - ./backtest_results:/app/backtest_results
       - ./signals_history:/app/signals_history
+      - ./config:/app/config
       - ./.env:/app/.env:ro
     environment:
       - PYTHONPATH=/app
@@ -24,8 +25,9 @@ services:
 
     networks:
       - smc-network
+    command: python start_web_panel.py
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 30s
       timeout: 10s
       retries: 3

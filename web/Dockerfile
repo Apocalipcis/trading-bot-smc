@@ -2,7 +2,7 @@
 FROM python:3.11-slim
 
 LABEL maintainer="SMC Trading Bot"
-LABEL description="Smart Money Concepts Trading Bot - Web Interface"
+LABEL description="Smart Money Concepts Trading Bot - New Web Interface"
 
 # Set working directory
 WORKDIR /app
@@ -16,15 +16,17 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copy project files (copy everything needed for the new panel)
 COPY src/ ./src/
-COPY web/backend/ ./web/backend/
-COPY web/frontend/ ./web/frontend/
+COPY config/ ./config/
+COPY start_web_panel.py .
 COPY config.py .
 COPY dot.env.example .env
 
+
+
 # Create necessary directories
-RUN mkdir -p data signals_history
+RUN mkdir -p data signals_history backtest_results logs
 
 # Set environment variables
 ENV PYTHONPATH=/app
@@ -33,9 +35,9 @@ ENV PYTHONUNBUFFERED=1
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check - use proper endpoint from new panel
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/status || exit 1
+    CMD curl -f http://localhost:8000/ || exit 1
 
-# Start command
-CMD ["python", "web/backend/main.py"]
+# Start command - use the new panel launcher
+CMD ["python", "start_web_panel.py"]

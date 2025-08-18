@@ -22,6 +22,43 @@ sys.path.append(str(project_root))
 
 from config import load_config, save_config, AppConfig, PairConfig, PairStatus
 from src.core import LiveExchangeGateway, PairManager
+from src.pre_trade_backtest import run_symbol_backtest
+from src.data_downloader import download_crypto_data
+from src.telegram_client import TelegramClient
+import os
+import glob
+from datetime import datetime, timedelta
+
+# Load environment variables from .env file
+def _load_dotenv(path: str = ".env") -> None:
+    """Lightweight .env loader (no external deps). Sets os.environ if not set.
+
+    Supports simple lines: KEY=VALUE, ignores comments and empty lines.
+    Strips surrounding single/double quotes from VALUE.
+    """
+    try:
+        if not os.path.exists(path):
+            return
+        with open(path, 'r', encoding='utf-8') as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' not in line:
+                    continue
+                key, val = line.split('=', 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and (key not in os.environ):
+                    os.environ[key] = val
+    except Exception:
+        # Fail silently; env loading is best-effort
+        pass
+
+# Load .env file
+_load_dotenv()
+
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,8 +71,12 @@ app = FastAPI(
 )
 
 # Templates and static files
-templates = Jinja2Templates(directory="src/web/templates")
-app.mount("/static", StaticFiles(directory="src/web/static"), name="static")
+# Get proper paths relative to project root
+template_dir = project_root / "src" / "web" / "templates"
+static_dir = project_root / "src" / "web" / "static"
+
+templates = Jinja2Templates(directory=str(template_dir))
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Global state
 class BotState:
@@ -46,8 +87,37 @@ class BotState:
         self.is_running: bool = False
         self.pair_statuses: Dict[str, PairStatus] = {}
         self.signals: List[Dict] = []
+        self.telegram_client = None
+        self.telegram_enabled: bool = False
 
 bot_state = BotState()
+
+# Initialize Telegram if configured
+def init_telegram():
+    """Initialize Telegram client if configured"""
+    try:
+        # Use environment variables or config values
+        token = os.getenv('TELEGRAM_BOT_TOKEN') or bot_state.config.telegram_token
+        chat_id = os.getenv('TELEGRAM_CHAT_ID') or bot_state.config.telegram_chat_id
+        
+        if token and chat_id:
+            bot_state.telegram_client = TelegramClient(token, chat_id)
+            # Test connection
+            if bot_state.telegram_client.test_connection():
+                bot_state.telegram_enabled = True
+                logger.info("Telegram client initialized successfully")
+            else:
+                bot_state.telegram_enabled = False
+                logger.warning("Telegram client failed connection test")
+        else:
+            bot_state.telegram_enabled = False
+            logger.info("Telegram not configured (missing token or chat_id)")
+    except Exception as e:
+        logger.error(f"Failed to initialize Telegram: {e}")
+        bot_state.telegram_enabled = False
+
+# Initialize Telegram on startup
+init_telegram()
 
 # Pydantic models for API
 class PairToggleRequest(BaseModel):
@@ -113,12 +183,14 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "config": bot_state.config,
+        "pairs": bot_state.config.pairs,  # Add this for the template
         "pair_statuses": bot_state.pair_statuses,
         "is_running": bot_state.is_running,
         "signals": bot_state.signals[:10],  # Last 10 signals
         "total_pairs": len(bot_state.config.pairs),
         "enabled_pairs": len([p for p in bot_state.config.pairs if p.enabled]),
-        "backtest_pairs": len([p for p in bot_state.config.pairs if p.backtest_enabled])
+        "backtest_pairs": len([p for p in bot_state.config.pairs if p.backtest_enabled]),
+        "telegram_enabled": bot_state.telegram_enabled
     })
 
 
@@ -163,11 +235,25 @@ async def toggle_pair_enabled(symbol: str, enabled: bool = Form(...)):
             await bot_state.pair_manager.apply_config(bot_state.config)
         
         logger.info(f"Toggled {symbol} enabled: {enabled}")
-        return {"success": True, "symbol": symbol, "enabled": enabled}
+        
+        # Return HTML fragment instead of JSON for HTMX
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> {symbol} trading {'enabled' if enabled else 'disabled'}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
         
     except Exception as e:
         logger.error(f"Error toggling {symbol} enabled: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to toggle {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 @app.post("/api/pairs/{symbol}/toggle-backtest")
@@ -191,11 +277,25 @@ async def toggle_pair_backtest(symbol: str, backtest_enabled: bool = Form(...)):
             await bot_state.pair_manager.apply_config(bot_state.config)
         
         logger.info(f"Toggled {symbol} backtest: {backtest_enabled}")
-        return {"success": True, "symbol": symbol, "backtest_enabled": backtest_enabled}
+        
+        # Return HTML fragment instead of JSON for HTMX
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> {symbol} backtest {'enabled' if backtest_enabled else 'disabled'}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
         
     except Exception as e:
         logger.error(f"Error toggling {symbol} backtest: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to toggle {symbol} backtest: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 @app.post("/api/pairs/add")
@@ -465,6 +565,428 @@ async def run_single_backtest(symbol: str, request: Request):
             "type": "error",
             "message": f"❌ Error running backtest for {symbol}: {str(e)}"
         })
+
+
+# New Backtest API endpoints
+@app.post("/api/backtests/fetch")
+async def fetch_backtest_data(
+    symbol: str = Form(...),
+    timeframe: str = Form("15m"),
+    days: int = Form(30),
+    until: Optional[str] = Form(None)
+):
+    """Fetch historical data for backtesting"""
+    try:
+        symbol = symbol.upper().strip()
+        
+        # Convert days to start/end dates
+        if until:
+            end_date = datetime.strptime(until, "%Y-%m-%d")
+        else:
+            end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        logger.info(f"Fetching {symbol} {timeframe} data from {start_date.date()} to {end_date.date()}")
+        
+        # Use existing data downloader
+        try:
+            ltf_file, htf_file = download_crypto_data(symbol, days)
+            return HTMLResponse(f"""
+                <div class="alert alert-success alert-dismissible fade show">
+                    <i class="bi bi-check-circle"></i>
+                    <strong>Success!</strong> Downloaded {symbol} data for {days} days.
+                    <br><small>Files: {ltf_file}, {htf_file}</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        except Exception as e:
+            logger.error(f"Data download failed: {e}")
+            return HTMLResponse(f"""
+                <div class="alert alert-danger alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Error!</strong> Failed to download {symbol} data: {str(e)}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+            
+    except Exception as e:
+        logger.error(f"Fetch data error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.post("/api/backtests/run")
+async def run_backtest_analysis(
+    symbol: str = Form(...),
+    timeframe: str = Form("15m"),
+    days: int = Form(30),
+    min_rr: float = Form(3.0),
+    require_fvg: bool = Form(False)
+):
+    """Run backtest analysis on cached data"""
+    try:
+        symbol = symbol.upper().strip()
+        
+        # Prepare config for backtest
+        config_dict = {
+            'min_risk_reward': min_rr,
+            'fractal_left': 2,
+            'fractal_right': 2,
+            'require_fvg_confluence': require_fvg,
+            'backtest_days': days
+        }
+        
+        logger.info(f"Running backtest for {symbol} with RR={min_rr}")
+        
+        # Run backtest using existing module
+        result = await asyncio.create_task(
+            asyncio.to_thread(run_symbol_backtest, symbol, config_dict)
+        )
+        
+        if result.get('success', False):
+            total_trades = result.get('total_trades', 0)
+            win_rate = result.get('win_rate', 0)
+            profit_factor = result.get('profit_factor', 0)
+            total_pnl = result.get('total_pnl', 0)
+            
+            return HTMLResponse(f"""
+                <div class="alert alert-success alert-dismissible fade show">
+                    <i class="bi bi-chart-line"></i>
+                    <strong>Backtest Complete!</strong> {symbol} - {total_trades} trades
+                    <br><small>Win Rate: {win_rate:.1f}% | P&L: ${total_pnl:.2f} | PF: {profit_factor:.2f}</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Backtest Failed!</strong> {symbol}: {error_msg}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+            
+    except Exception as e:
+        logger.error(f"Backtest run error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.delete("/api/backtests/results/{symbol}")
+async def delete_backtest_results(symbol: str):
+    """Delete backtest results for a symbol"""
+    try:
+        symbol = symbol.upper()
+        backtest_dir = Path("backtest_results") / symbol
+        
+        if not backtest_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Backtest results for {symbol} not found")
+        
+        # Remove entire directory
+        import shutil
+        shutil.rmtree(backtest_dir)
+        
+        logger.info(f"Deleted backtest results for {symbol}")
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> Deleted backtest results for {symbol}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error deleting backtest results for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to delete {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.delete("/api/backtests/data/{filename}")
+async def delete_cached_data(filename: str):
+    """Delete cached data file"""
+    try:
+        data_file = Path("data") / filename
+        
+        if not data_file.exists():
+            raise HTTPException(status_code=404, detail=f"File {filename} not found")
+        
+        # Remove file
+        data_file.unlink()
+        
+        logger.info(f"Deleted cached data file: {filename}")
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> Deleted file {filename}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error deleting file {filename}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to delete {filename}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.get("/api/backtests/results/{symbol}")
+async def view_backtest_results(symbol: str, request: Request):
+    """View detailed backtest results for a symbol"""
+    try:
+        symbol = symbol.upper()
+        results_file = Path("backtest_results") / symbol / "latest_results.json"
+        
+        if not results_file.exists():
+            raise HTTPException(status_code=404, detail=f"Results for {symbol} not found")
+        
+        # Read and parse results
+        with open(results_file, 'r', encoding='utf-8') as f:
+            import json
+            data = json.load(f)
+        
+        # Extract report data
+        if 'report' in data:
+            report = data['report']
+        else:
+            report = data
+        
+        # Format results for display
+        total_trades = report.get('total_trades', 0)
+        win_rate = report.get('win_rate', 0)
+        profit_factor = report.get('profit_factor', 0)
+        total_pnl = report.get('total_pnl', 0)
+        max_drawdown = report.get('max_drawdown', 0)
+        
+        return HTMLResponse(f"""
+            <div class="modal fade" id="resultsModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Backtest Results: {symbol}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Performance Metrics</h6>
+                                    <ul class="list-unstyled">
+                                        <li><strong>Total Trades:</strong> {total_trades}</li>
+                                        <li><strong>Win Rate:</strong> {win_rate:.1f}%</li>
+                                        <li><strong>Profit Factor:</strong> {profit_factor:.2f}</li>
+                                        <li><strong>Total P&L:</strong> ${total_pnl:.2f}</li>
+                                        <li><strong>Max Drawdown:</strong> {max_drawdown:.2f}%</li>
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Risk Analysis</h6>
+                                    <ul class="list-unstyled">
+                                        <li><strong>Risk Level:</strong> {report.get('risk_level', 'N/A')}</li>
+                                        <li><strong>Recommendation:</strong> {report.get('recommendation', 'N/A')}</li>
+                                        <li><strong>Last Updated:</strong> {data.get('timestamp', 'N/A')}</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error viewing results for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to load results for {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.get("/api/backtests/history")
+async def get_backtest_history(request: Request):
+    """Get list of cached data files and backtest results"""
+    try:
+        # Get data directory files
+        data_dir = Path("data")
+        backtest_dir = Path("backtest_results")
+        
+        cached_files = []
+        if data_dir.exists():
+            for file_path in data_dir.glob("*.csv"):
+                stat = file_path.stat()
+                cached_files.append({
+                    'name': file_path.name,
+                    'size': f"{stat.st_size / 1024:.1f} KB",
+                    'modified': datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                })
+        
+        # Get backtest results
+        backtest_results = []
+        if backtest_dir.exists():
+            for symbol_dir in backtest_dir.iterdir():
+                if symbol_dir.is_dir():
+                    latest_file = symbol_dir / "latest_results.json"
+                    if latest_file.exists():
+                        stat = latest_file.stat()
+                        backtest_results.append({
+                            'symbol': symbol_dir.name,
+                            'last_run': datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                            'file_size': f"{stat.st_size / 1024:.1f} KB"
+                        })
+        
+        return templates.TemplateResponse("backtest_results.html", {
+            "request": request,
+            "cached_files": cached_files,
+            "backtest_results": backtest_results
+        })
+        
+    except Exception as e:
+        logger.error(f"Backtest history error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                Error loading history: {str(e)}
+            </div>
+        """)
+
+
+@app.post("/api/telegram/toggle")
+async def toggle_telegram():
+    """Toggle Telegram notifications"""
+    try:
+        if bot_state.telegram_enabled:
+            # Disable Telegram
+            bot_state.telegram_enabled = False
+            bot_state.telegram_client = None
+            logger.info("Telegram disabled")
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning!</strong> Telegram notifications disabled
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        else:
+            # Try to enable Telegram
+            init_telegram()
+            if bot_state.telegram_enabled:
+                # Send test message
+                test_sent = bot_state.telegram_client.send_status_update("✅ Telegram notifications enabled!")
+                if test_sent:
+                    logger.info("Telegram enabled and test message sent")
+                    return HTMLResponse(f"""
+                        <div class="alert alert-success alert-dismissible fade show">
+                            <i class="bi bi-check-circle"></i>
+                            <strong>Success!</strong> Telegram enabled and test message sent
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    """)
+                else:
+                    bot_state.telegram_enabled = False
+                    return HTMLResponse(f"""
+                        <div class="alert alert-danger alert-dismissible fade show">
+                            <i class="bi bi-x-circle"></i>
+                            <strong>Error!</strong> Telegram connected but failed to send test message
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    """)
+            else:
+                return HTMLResponse(f"""
+                    <div class="alert alert-danger alert-dismissible fade show">
+                        <i class="bi bi-x-circle"></i>
+                        <strong>Error!</strong> Failed to connect to Telegram. Check token and chat_id
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                """)
+                
+    except Exception as e:
+        logger.error(f"Telegram toggle error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-x-circle"></i>
+                <strong>Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.post("/api/telegram/test")
+async def test_telegram():
+    """Send test message to Telegram"""
+    try:
+        if not bot_state.telegram_enabled or not bot_state.telegram_client:
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning!</strong> Telegram not enabled
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        
+        # Send test signal
+        test_signal = {
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "entry": 43250.50,
+            "sl": 42800.00,
+            "tp": 44600.00,
+            "rr": 3.0,
+            "htf_bias": "bull",
+            "fvg_confluence": True
+        }
+        
+        success = bot_state.telegram_client.send_signal_notification(test_signal)
+        
+        if success:
+            return HTMLResponse(f"""
+                <div class="alert alert-success alert-dismissible fade show">
+                    <i class="bi bi-check-circle"></i>
+                    <strong>Success!</strong> Test signal sent to Telegram
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        else:
+            return HTMLResponse(f"""
+                <div class="alert alert-danger alert-dismissible fade show">
+                    <i class="bi bi-x-circle"></i>
+                    <strong>Error!</strong> Failed to send test message
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+            
+    except Exception as e:
+        logger.error(f"Telegram test error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-x-circle"></i>
+                <strong>Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 if __name__ == "__main__":

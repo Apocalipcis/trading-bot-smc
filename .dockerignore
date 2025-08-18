@@ -51,7 +51,7 @@ backtest_results/
 data/
 logs/
 *.log
-.env
+# .env - Allow .env file for Docker builds
 .env.local
 .env.*.local
 

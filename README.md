@@ -61,7 +61,7 @@ venv\Scripts\python.exe live_trading.py --symbol ETHUSDT --run-backtest --skip-b
 #### Веб-інтерфейс
 ```bash
 # Запуск веб-сервера
-python web/start-web.py
+python start_web_panel.py
 
 # API ендпоінти для бектесту:
 POST /api/backtest/{symbol}          # Запуск бектесту для пари
