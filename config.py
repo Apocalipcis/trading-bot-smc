@@ -13,7 +13,7 @@ class SMCConfig:
     fractal_right: int = 2
     
     # Risk management
-    min_risk_reward: float = 2.0
+    min_risk_reward: float = 3.0
     max_risk_per_trade: float = 0.02  # 2% of account per trade
     
     # Analysis parameters
@@ -23,6 +23,9 @@ class SMCConfig:
     # Signal filtering
     require_fvg_confluence: bool = False  # Require FVG confluence for signals
     premium_discount_filter: bool = True  # Use P/D filter
+    
+    # Live monitor settings
+    status_check_interval: int = 45  # seconds between signal status updates
     
     # File paths
     ltf_data_path: Optional[str] = None

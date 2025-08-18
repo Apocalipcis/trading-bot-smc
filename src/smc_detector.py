@@ -107,8 +107,8 @@ def detect_fvg(df: pd.DataFrame) -> List[FVG]:
             fvgs.append(FVG(
                 start_idx=i-2,
                 end_idx=i,
-                top=float(df['low'].iloc[i-2]),
-                bottom=float(df['high'].iloc[i]),
+                top=float(df['high'].iloc[i-2]),
+                bottom=float(df['low'].iloc[i]),
                 direction='down'
             ))
             
