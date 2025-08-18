@@ -159,6 +159,56 @@ body {
     color: white;
 }
 
+.btn-add {
+    background: #3498db;
+    color: white;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+
+.btn-info {
+    background: #17a2b8;
+    color: white;
+}
+
+.btn-quick {
+    background: #6c757d;
+    color: white;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin: 2px;
+}
+
+.btn-quick:hover {
+    background: #5a6268;
+}
+
+/* Quick Add Section */
+.quick-add-section {
+    margin: 15px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #3498db;
+}
+
+.quick-add-section h4 {
+    margin: 0 0 10px 0;
+    color: #2c3e50;
+    font-size: 14px;
+}
+
+.quick-add-section h4 i {
+    color: #3498db;
+    margin-right: 8px;
+}
+
+.quick-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
 /* Market Info */
 .market-info {
     display: grid;
@@ -192,6 +242,89 @@ body {
 
 .status-online { color: #27ae60; }
 .status-offline { color: #e74c3c; }
+
+/* Pairs Management */
+.pairs-management {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.pairs-management h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    font-size: 18px;
+}
+
+.pairs-management h3 i {
+    color: #3498db;
+    margin-right: 10px;
+}
+
+.pairs-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.no-pairs {
+    color: #7f8c8d;
+    font-style: italic;
+    padding: 10px 0;
+}
+
+.pair-tag {
+    display: flex;
+    align-items: center;
+    background: #ecf0f1;
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #2c3e50;
+    transition: all 0.3s;
+}
+
+.pair-tag:hover {
+    background: #d5dbdb;
+}
+
+.pair-tag.active {
+    background: #27ae60;
+    color: white;
+}
+
+.pair-tag.connecting {
+    background: #f39c12;
+    color: white;
+}
+
+.pair-tag.error {
+    background: #e74c3c;
+    color: white;
+}
+
+.pair-remove {
+    background: none;
+    border: none;
+    color: inherit;
+    margin-left: 8px;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.3s;
+}
+
+.pair-remove:hover {
+    background: rgba(0, 0, 0, 0.2);
+}
 
 /* Symbol Cards */
 .symbols-grid {

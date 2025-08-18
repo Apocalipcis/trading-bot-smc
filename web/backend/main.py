@@ -44,16 +44,26 @@ app.add_middleware(
 
 # Serve static files (frontend)
 frontend_path = Path(__file__).parent.parent / "frontend"
-app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+if frontend_path.exists():
+    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+else:
+    logger.error(f"Frontend path does not exist: {frontend_path}")
+    # Try alternative path
+    alt_frontend_path = Path(__file__).parent.parent.parent / "web" / "frontend"
+    if alt_frontend_path.exists():
+        app.mount("/static", StaticFiles(directory=alt_frontend_path), name="static")
+        frontend_path = alt_frontend_path
+    else:
+        logger.error(f"Alternative frontend path also does not exist: {alt_frontend_path}")
 
 # Pydantic models
 class BotConfig(BaseModel):
-    symbols: List[str] = ["ETHUSDT"]  # Support multiple symbols
+    symbols: List[str] = ["BTCUSDT"]  # Support multiple symbols
     min_risk_reward: float = 3.0
     fractal_left: int = 2
     fractal_right: int = 2
-    telegram_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
+    telegram_token: Optional[str] = "7834170834:AAG1OxqOxCjxFP38oUW-TAPidA7CkfV2c3c"
+    telegram_chat_id: Optional[str] = "333744879"
     status_check_interval: int = 45
 
 class SignalResponse(BaseModel):
@@ -232,9 +242,22 @@ bot_manager = BotManager()
 # API Routes
 @app.get("/")
 async def root():
-    """Redirect to frontend"""
+    """Serve main page"""
     from fastapi.responses import FileResponse
-    return FileResponse(frontend_path / "index.html")
+    index_path = frontend_path / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    else:
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse("""
+        <html><body>
+        <h1>SMC Trading Bot - Web Interface</h1>
+        <p>Error: Frontend files not found</p>
+        <p>Frontend path: {}</p>
+        <p>Index file: {}</p>
+        <p><a href="/api/status">API Status</a></p>
+        </body></html>
+        """.format(frontend_path, index_path))
 
 @app.get("/api/status")
 async def get_status():
@@ -281,6 +304,91 @@ async def clear_signals():
     })
     return {"message": "Signals cleared"}
 
+@app.post("/api/symbols/add")
+async def add_symbol(symbol: str):
+    """Add a new trading symbol"""
+    symbol = symbol.upper().strip()
+    
+    if symbol not in bot_manager.config.symbols:
+        bot_manager.config.symbols.append(symbol)
+        
+        # If bot is running, start engine for new symbol
+        if bot_manager.is_running:
+            config_dict = {
+                'min_risk_reward': bot_manager.config.min_risk_reward,
+                'fractal_left': bot_manager.config.fractal_left,
+                'fractal_right': bot_manager.config.fractal_right,
+                'status_check_interval': bot_manager.config.status_check_interval
+            }
+            
+            engine = LiveSMCEngine(symbol, config_dict)
+            engine.add_signal_callback(bot_manager._on_new_signal)
+            engine.add_update_callback(lambda tf, data, sym=symbol: bot_manager._on_data_update(sym, tf, data))
+            
+            # Start engine in background
+            asyncio.create_task(engine.start())
+            bot_manager.engines[symbol] = engine
+            
+            # Initialize market data
+            bot_manager.market_data[symbol] = {
+                'current_price': 0.0,
+                'htf_bias': 'neutral',
+                'status': 'starting'
+            }
+        
+        await bot_manager._broadcast_status()
+        logger.info(f"Added symbol: {symbol}")
+        return {"message": f"Symbol {symbol} added successfully"}
+    else:
+        return {"message": f"Symbol {symbol} already exists"}
+
+@app.delete("/api/symbols/{symbol}")
+async def remove_symbol(symbol: str):
+    """Remove a trading symbol"""
+    symbol = symbol.upper().strip()
+    
+    if symbol in bot_manager.config.symbols:
+        # Don't allow removing all symbols
+        if len(bot_manager.config.symbols) <= 1:
+            return {"message": "Cannot remove the last symbol"}
+        
+        bot_manager.config.symbols.remove(symbol)
+        
+        # Stop and remove engine if running
+        if symbol in bot_manager.engines:
+            engine = bot_manager.engines[symbol]
+            await engine.stop()
+            del bot_manager.engines[symbol]
+        
+        # Remove market data
+        if symbol in bot_manager.market_data:
+            del bot_manager.market_data[symbol]
+        
+        await bot_manager._broadcast_status()
+        logger.info(f"Removed symbol: {symbol}")
+        return {"message": f"Symbol {symbol} removed successfully"}
+    else:
+        return {"message": f"Symbol {symbol} not found"}
+
+@app.post("/api/test-alert")
+async def send_test_alert(signal: dict):
+    """Send a test Telegram alert"""
+    try:
+        if bot_manager.telegram_client:
+            await asyncio.create_task(
+                asyncio.to_thread(
+                    bot_manager.telegram_client.send_signal_notification, 
+                    signal
+                )
+            )
+            logger.info("Test alert sent successfully")
+            return {"message": "Test alert sent to Telegram"}
+        else:
+            return {"message": "Telegram client not configured", "error": True}
+    except Exception as e:
+        logger.error(f"Failed to send test alert: {e}")
+        return {"message": f"Failed to send test alert: {e}", "error": True}
+
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -297,8 +405,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 "config": bot_manager.config.dict(),
                 "status": {
                     "is_running": bot_manager.is_running,
-                    "current_price": bot_manager.current_price,
-                    "htf_bias": bot_manager.htf_bias
+                    "symbols": bot_manager.config.symbols,
+                    "market_data": bot_manager.market_data,
+                    "engines_count": len(bot_manager.engines)
                 }
             }
         }))

@@ -6,12 +6,12 @@ class SMCWebInterface {
         this.isConnected = false;
         this.signals = [];
         this.config = {
-            symbols: ['ETHUSDT'],
+            symbols: ['BTCUSDT'],
             min_risk_reward: 3.0,
             fractal_left: 2,
             fractal_right: 2,
-            telegram_token: '',
-            telegram_chat_id: '',
+            telegram_token: '7834170834:AAG1OxqOxCjxFP38oUW-TAPidA7CkfV2c3c',
+            telegram_chat_id: '333744879',
             status_check_interval: 45
         };
         
@@ -23,19 +23,21 @@ class SMCWebInterface {
     
     initializeElements() {
         // Control elements
-        this.symbolsInput = document.getElementById('symbols');
+        this.newSymbolInput = document.getElementById('new-symbol');
+        this.addSymbolBtn = document.getElementById('add-symbol-btn');
         this.minRrInput = document.getElementById('min-rr');
         this.startBtn = document.getElementById('start-btn');
         this.stopBtn = document.getElementById('stop-btn');
         this.clearBtn = document.getElementById('clear-btn');
+        this.testAlertBtn = document.getElementById('test-alert-btn');
         
         // Status elements
         this.statusText = document.getElementById('status-text');
         this.statusDot = document.getElementById('status-dot');
-        this.activePairs = document.getElementById('active-pairs');
         this.enginesCount = document.getElementById('engines-count');
         this.wsStatus = document.getElementById('ws-status');
         this.symbolsGrid = document.getElementById('symbols-grid');
+        this.pairsList = document.getElementById('pairs-list');
         
         // Statistics elements
         this.totalSignals = document.getElementById('total-signals');
@@ -59,9 +61,15 @@ class SMCWebInterface {
         this.startBtn.addEventListener('click', () => this.startBot());
         this.stopBtn.addEventListener('click', () => this.stopBot());
         this.clearBtn.addEventListener('click', () => this.clearSignals());
+        this.testAlertBtn.addEventListener('click', () => this.sendTestAlert());
+        
+        // Symbol management
+        this.addSymbolBtn.addEventListener('click', () => this.addSymbol());
+        this.newSymbolInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.addSymbol();
+        });
         
         // Config inputs
-        this.symbolsInput.addEventListener('change', () => this.updateConfig());
         this.minRrInput.addEventListener('change', () => this.updateConfig());
         
         // Telegram config
@@ -158,10 +166,12 @@ class SMCWebInterface {
         this.config = { ...this.config, ...data.config };
         
         // Update UI with config
-        this.symbolsInput.value = this.config.symbols ? this.config.symbols.join(',') : 'ETHUSDT';
         this.minRrInput.value = this.config.min_risk_reward;
         this.telegramToken.value = this.config.telegram_token || '';
         this.telegramChatId.value = this.config.telegram_chat_id || '';
+        
+        // Update pairs list
+        this.updatePairsList();
         
         // Update status
         this.updateBotStatus(data.status.is_running);
@@ -217,8 +227,10 @@ class SMCWebInterface {
     
     updateMarketInfo(data) {
         // Update basic info
-        this.activePairs.textContent = data.symbols ? data.symbols.join(', ') : 'None';
         this.enginesCount.textContent = data.engines_count || 0;
+        
+        // Update pairs list
+        this.updatePairsList();
         
         // Update symbol cards
         this.updateSymbolCards(data.market_data || {});
@@ -400,10 +412,105 @@ class SMCWebInterface {
         }
     }
     
+    addSymbol() {
+        const newSymbol = this.newSymbolInput.value.toUpperCase().trim();
+        
+        if (!newSymbol) {
+            this.showToast('Please enter a symbol', 'warning');
+            return;
+        }
+        
+        if (this.config.symbols.includes(newSymbol)) {
+            this.showToast(`${newSymbol} is already added`, 'warning');
+            return;
+        }
+        
+        this.config.symbols.push(newSymbol);
+        this.newSymbolInput.value = '';
+        
+        this.updateConfig();
+        this.updatePairsList();
+        this.showToast(`Added ${newSymbol}`, 'success');
+    }
+    
+    removeSymbol(symbol) {
+        const index = this.config.symbols.indexOf(symbol);
+        if (index > -1) {
+            this.config.symbols.splice(index, 1);
+            
+            // Don't allow removing all symbols
+            if (this.config.symbols.length === 0) {
+                this.config.symbols = ['ETHUSDT'];
+            }
+            
+            this.updateConfig();
+            this.updatePairsList();
+            this.showToast(`Removed ${symbol}`, 'success');
+        }
+    }
+    
+    updatePairsList() {
+        if (this.config.symbols.length === 0) {
+            this.pairsList.innerHTML = '<div class="no-pairs">No pairs added yet. Add a symbol above.</div>';
+            return;
+        }
+        
+        this.pairsList.innerHTML = this.config.symbols.map(symbol => {
+            const status = this.getSymbolStatus(symbol);
+            return `
+                <div class="pair-tag ${status}">
+                    ${symbol}
+                    <button class="pair-remove" onclick="window.smcApp.removeSymbol('${symbol}')" title="Remove ${symbol}">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    getSymbolStatus(symbol) {
+        // This will be updated based on market data
+        return 'active'; // Default status
+    }
+    
+    quickAddSymbol(symbol) {
+        this.newSymbolInput.value = symbol;
+        this.addSymbol();
+    }
+    
+    async sendTestAlert() {
+        try {
+            // Create a test signal
+            const testSignal = {
+                timestamp: new Date().toISOString(),
+                symbol: 'TESTUSDT',
+                direction: 'LONG',
+                entry: 50000.00,
+                sl: 49000.00,
+                tp: 53000.00,
+                rr: 3.0,
+                htf_bias: 'bull',
+                fvg_confluence: true,
+                confidence: 'high'
+            };
+            
+            const response = await fetch('/api/test-alert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(testSignal)
+            });
+            
+            if (response.ok) {
+                this.showToast('🔔 Test alert sent to Telegram!', 'success');
+            } else {
+                throw new Error('Failed to send test alert');
+            }
+        } catch (error) {
+            this.showToast(`❌ Test alert failed: ${error.message}`, 'error');
+        }
+    }
+
     async updateConfig() {
-        // Parse symbols from comma-separated string
-        const symbolsText = this.symbolsInput.value.toUpperCase().trim();
-        this.config.symbols = symbolsText ? symbolsText.split(',').map(s => s.trim()).filter(s => s) : ['ETHUSDT'];
         this.config.min_risk_reward = parseFloat(this.minRrInput.value);
         
         try {
@@ -437,10 +544,11 @@ class SMCWebInterface {
         const saved = localStorage.getItem('smc-config');
         if (saved) {
             const config = JSON.parse(saved);
-            this.symbolsInput.value = config.symbols ? config.symbols.join(',') : 'ETHUSDT,BTCUSDT';
+            this.config.symbols = config.symbols || ['ETHUSDT'];
             this.minRrInput.value = config.min_risk_reward || 3.0;
             this.telegramToken.value = config.telegram_token || '';
             this.telegramChatId.value = config.telegram_chat_id || '';
+            this.updatePairsList();
         }
     }
     
