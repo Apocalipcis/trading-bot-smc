@@ -1260,6 +1260,30 @@ async def run_csv_backtest(
         )
 
 
+@app.get("/api/backtest/csv/files")
+async def get_csv_files():
+    """Get list of available CSV files in data/ directory"""
+    try:
+        data_dir = Path("data")
+        csv_files = []
+        
+        if data_dir.exists():
+            for file_path in data_dir.glob("*.csv"):
+                csv_files.append(file_path.name)
+        
+        # Sort files alphabetically
+        csv_files.sort()
+        
+        return JSONResponse(content=csv_files)
+        
+    except Exception as e:
+        logger.error(f"Error getting CSV files: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
 @app.get("/api/backtest/csv/form")
 async def get_csv_backtest_form():
     """Get HTML form for CSV backtest"""
