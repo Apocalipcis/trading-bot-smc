@@ -25,6 +25,8 @@ from src.core import LiveExchangeGateway, PairManager
 from src.pre_trade_backtest import run_symbol_backtest
 from src.data_downloader import download_crypto_data
 from src.telegram_client import TelegramClient
+from src.data_loader import prepare_data, validate_timeframe_alignment
+from src.signal_generator import generate_signals
 import os
 import glob
 from datetime import datetime, timedelta
@@ -1183,6 +1185,151 @@ async def test_telegram():
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         """)
+
+
+@app.post("/api/backtest/csv")
+async def run_csv_backtest(
+    ltf_file: str = Form(...),
+    htf_file: str = Form(...),
+    rr_min: float = Form(3.0),
+    fractal_left: int = Form(2),
+    fractal_right: int = Form(2),
+    require_fvg: bool = Form(False)
+):
+    """Run backtest with CSV files (replaces main.py functionality)"""
+    try:
+        # Validate input files exist
+        ltf_path = Path(ltf_file)
+        htf_path = Path(htf_file)
+        
+        if not ltf_path.exists():
+            raise HTTPException(status_code=400, detail=f"LTF file not found: {ltf_file}")
+        if not htf_path.exists():
+            raise HTTPException(status_code=400, detail=f"HTF file not found: {htf_file}")
+        
+        logger.info(f"Starting CSV backtest: LTF={ltf_file}, HTF={htf_file}")
+        
+        # Load data
+        df_ltf, df_htf = prepare_data(str(ltf_path), str(htf_path))
+        
+        # Validate timeframe alignment
+        if not validate_timeframe_alignment(df_ltf, df_htf):
+            logger.warning("Timeframe alignment issues detected")
+        
+        # Generate signals
+        signals = generate_signals(
+            df_ltf=df_ltf,
+            df_htf=df_htf,
+            left=fractal_left,
+            right=fractal_right,
+            rr_min=rr_min
+        )
+        
+        # Save results
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = f"backtest_results/csv_backtest_{timestamp}.csv"
+        signals.to_csv(output_file, index=False)
+        
+        # Prepare response
+        result = {
+            "success": True,
+            "total_signals": len(signals),
+            "long_signals": len(signals[signals['direction'] == 'LONG']) if len(signals) > 0 else 0,
+            "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
+            "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
+            "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
+            "output_file": output_file,
+            "parameters": {
+                "ltf_file": ltf_file,
+                "htf_file": htf_file,
+                "rr_min": rr_min,
+                "fractal_left": fractal_left,
+                "fractal_right": fractal_right,
+                "require_fvg": require_fvg
+            }
+        }
+        
+        logger.info(f"CSV backtest completed: {result['total_signals']} signals generated")
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"CSV backtest error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.get("/api/backtest/csv/form")
+async def get_csv_backtest_form():
+    """Get HTML form for CSV backtest"""
+    return HTMLResponse("""
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-file-earmark-csv"></i> CSV Backtest</h5>
+            </div>
+            <div class="card-body">
+                <form hx-post="/api/backtest/csv" hx-target="#csv-backtest-result">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="ltf_file" class="form-label">Lower Timeframe CSV</label>
+                                <input type="text" class="form-control" id="ltf_file" name="ltf_file" 
+                                       placeholder="data/btc_15m.csv" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="htf_file" class="form-label">Higher Timeframe CSV</label>
+                                <input type="text" class="form-control" id="htf_file" name="htf_file" 
+                                       placeholder="data/btc_4h.csv" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="rr_min" class="form-label">Min Risk/Reward</label>
+                                <input type="number" class="form-control" id="rr_min" name="rr_min" 
+                                       value="3.0" step="0.1" min="1.0">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="fractal_left" class="form-label">Fractal Left</label>
+                                <input type="number" class="form-control" id="fractal_left" name="fractal_left" 
+                                       value="2" min="1">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="fractal_right" class="form-label">Fractal Right</label>
+                                <input type="number" class="form-control" id="fractal_right" name="fractal_right" 
+                                       value="2" min="1">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="require_fvg" class="form-label">Require FVG</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="require_fvg" name="require_fvg">
+                                    <label class="form-check-label" for="require_fvg">
+                                        Require FVG confluence
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-play-circle"></i> Run CSV Backtest
+                        </button>
+                    </div>
+                </form>
+                <div id="csv-backtest-result" class="mt-3"></div>
+            </div>
+        </div>
+    """)
 
 
 if __name__ == "__main__":

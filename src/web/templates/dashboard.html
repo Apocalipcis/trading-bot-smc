@@ -262,6 +262,19 @@
         </div>
         {% endif %}
 
+        <!-- CSV Backtest Button -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <button class="btn btn-outline-success btn-sm" 
+                        hx-get="/api/backtest/csv/form" 
+                        hx-target="#csv-backtest-container"
+                        hx-swap="innerHTML">
+                    <i class="bi bi-file-earmark-csv"></i> CSV Backtest
+                </button>
+                <div id="csv-backtest-container" class="mt-2"></div>
+            </div>
+        </div>
+
         <div class="row">
             <!-- Pairs Management -->
             <div class="col-lg-8">
