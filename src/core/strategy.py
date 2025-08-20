@@ -59,6 +59,8 @@ class SMCStrategy(Strategy):
     async def generate_signals(self, ltf_candles: List[Candle], htf_candles: List[Candle]) -> List[Signal]:
         """Generate SMC trading signals"""
         try:
+            logger.info(f"Generating signals for {self.symbol}: LTF={len(ltf_candles)}, HTF={len(htf_candles)}")
+            
             if len(ltf_candles) < 50 or len(htf_candles) < 20:
                 logger.debug(f"Insufficient data for {self.symbol}: LTF={len(ltf_candles)}, HTF={len(htf_candles)}")
                 return []
@@ -67,8 +69,11 @@ class SMCStrategy(Strategy):
             ltf_df = self._candles_to_dataframe(ltf_candles)
             htf_df = self._candles_to_dataframe(htf_candles)
             
+            logger.info(f"Data converted for {self.symbol}: LTF shape={ltf_df.shape}, HTF shape={htf_df.shape}")
+            
             # Determine HTF bias
             self.htf_bias = self._get_htf_bias(htf_df)
+            logger.info(f"HTF bias for {self.symbol}: {self.htf_bias}")
             
             if self.htf_bias == 'neutral':
                 logger.debug(f"Neutral HTF bias for {self.symbol}, skipping signal generation")
@@ -81,6 +86,10 @@ class SMCStrategy(Strategy):
             
             if signals:
                 logger.info(f"Generated {len(signals)} signals for {self.symbol}")
+                for i, signal in enumerate(signals):
+                    logger.info(f"Signal {i+1} for {self.symbol}: {signal.direction} at {signal.entry}, RR={signal.risk_reward}")
+            else:
+                logger.info(f"No signals generated for {self.symbol}")
             
             return signals
             

@@ -27,7 +27,7 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: SOLUSDT
-  enabled: true
+  enabled: false
   backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
@@ -36,7 +36,7 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: ADAUSDT
-  enabled: true
+  enabled: false
   backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
@@ -45,7 +45,7 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: DOGEUSDT
-  enabled: true
+  enabled: false
   backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1
@@ -54,7 +54,7 @@ pairs:
   fractal_right: 2
   max_risk_per_trade: 0.02
 - symbol: TURBOUSDT
-  enabled: true
+  enabled: false
   backtest_enabled: false
   timeframe: 15m
   strategy: smc_v1

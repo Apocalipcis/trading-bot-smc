@@ -160,17 +160,25 @@ class AddPairRequest(BaseModel):
 async def startup_event():
     """Initialize the application"""
     logger.info("Starting SMC Trading Bot Web Interface")
+    logger.info(f"Config loaded with {len(bot_state.config.pairs)} pairs")
+    logger.info(f"Enabled pairs: {[p.symbol for p in bot_state.config.pairs if p.enabled]}")
     
     # Initialize exchange gateway
+    logger.info("Initializing exchange gateway...")
     bot_state.gateway = LiveExchangeGateway()
     await bot_state.gateway.__aenter__()
+    logger.info("Exchange gateway initialized")
     
     # Initialize pair manager
+    logger.info("Initializing pair manager...")
     bot_state.pair_manager = PairManager(bot_state.gateway, bot_state.config)
+    logger.info("Pair manager initialized")
     
     # Add callbacks
+    logger.info("Adding callbacks to pair manager...")
     bot_state.pair_manager.add_signal_callback(on_new_signal)
     bot_state.pair_manager.add_status_callback(on_status_update)
+    logger.info("Callbacks added successfully")
 
 
 @app.on_event("shutdown")
@@ -188,19 +196,46 @@ async def shutdown_event():
 def on_new_signal(signal):
     """Handle new trading signal"""
     logger.info(f"New signal: {signal.symbol} {signal.direction} at {signal.entry}")
+    logger.info(f"Signal details: {signal.to_dict()}")
+    
+    # Add signal to list
     bot_state.signals.insert(0, signal.to_dict())
     # Keep only last 50 signals
     bot_state.signals = bot_state.signals[:50]
+    
+    # Log current signals count by symbol
+    signal_counts = {}
+    for s in bot_state.signals:
+        symbol = s.get('symbol', 'UNKNOWN')
+        signal_counts[symbol] = signal_counts.get(symbol, 0) + 1
+    
+    logger.info(f"Current signals by symbol: {signal_counts}")
+    logger.info(f"Total signals in bot_state: {len(bot_state.signals)}")
 
 
 def on_status_update(statuses: Dict[str, PairStatus]):
     """Handle status updates"""
+    logger.info(f"Status update received for pairs: {list(statuses.keys())}")
+    for symbol, status in statuses.items():
+        logger.info(f"Pair {symbol}: status={status.status}, enabled={status.enabled}")
     bot_state.pair_statuses = statuses
 
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Main dashboard page"""
+    logger.info(f"Dashboard requested. Total signals: {len(bot_state.signals)}")
+    
+    # Log signals by symbol for dashboard
+    signal_counts = {}
+    for signal in bot_state.signals[:10]:
+        symbol = signal.get('symbol', 'UNKNOWN')
+        signal_counts[symbol] = signal_counts.get(symbol, 0) + 1
+    
+    logger.info(f"Signals by symbol in dashboard: {signal_counts}")
+    logger.info(f"Enabled pairs: {[p.symbol for p in bot_state.config.pairs if p.enabled]}")
+    logger.info(f"Running pairs: {list(bot_state.pair_statuses.keys())}")
+    
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "config": bot_state.config,
@@ -229,6 +264,16 @@ async def pairs_table(request: Request):
 @app.get("/signals-list", response_class=HTMLResponse)
 async def signals_list(request: Request):
     """HTMX endpoint for signals list"""
+    logger.info(f"Signals list requested. Total signals: {len(bot_state.signals)}")
+    
+    # Log signals by symbol
+    signal_counts = {}
+    for signal in bot_state.signals[:20]:
+        symbol = signal.get('symbol', 'UNKNOWN')
+        signal_counts[symbol] = signal_counts.get(symbol, 0) + 1
+    
+    logger.info(f"Signals by symbol in response: {signal_counts}")
+    
     return templates.TemplateResponse("signals_list.html", {
         "request": request,
         "signals": bot_state.signals[:20]
@@ -487,9 +532,6 @@ async def run_pair_backtest(symbol: str):
                 </div>
             """)
         
-        # Import backtest function
-        from src.pre_trade_backtest import run_symbol_backtest
-        
         # Build config dict for backtest
         config_dict = {
             'min_risk_reward': pair_config.min_risk_reward,
@@ -604,11 +646,17 @@ async def start_bot(request: Request):
         if not bot_state.pair_manager:
             raise HTTPException(status_code=500, detail="Pair manager not initialized")
         
+        logger.info("Starting trading bot...")
+        logger.info(f"Config pairs: {[p.symbol for p in bot_state.config.pairs]}")
+        logger.info(f"Enabled pairs: {[p.symbol for p in bot_state.config.pairs if p.enabled]}")
+        
         # Start pair manager
         await bot_state.pair_manager.start()
         bot_state.is_running = True
         
-        logger.info("Trading bot started")
+        logger.info("Trading bot started successfully")
+        logger.info(f"Pair statuses after start: {list(bot_state.pair_statuses.keys())}")
+        
         return templates.TemplateResponse("alert.html", {
             "request": request,
             "type": "success",
