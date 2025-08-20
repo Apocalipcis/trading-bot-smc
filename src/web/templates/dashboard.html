@@ -332,20 +332,59 @@
                             <form hx-post="/api/backtests/fetch" hx-target="#status-alert" hx-indicator="#fetch-spinner">
                                 <div class="mb-3">
                                     <label for="fetch-symbol" class="form-label">Symbol</label>
-                                    <select class="form-control" name="symbol" id="fetch-symbol">
-                                        {% for pair in config.pairs %}
-                                        <option value="{{ pair.symbol }}">{{ pair.symbol }}</option>
-                                        {% endfor %}
-                                    </select>
+                                    <div class="input-group">
+                                        <select class="form-control" name="symbol" id="fetch-symbol" onchange="handleSymbolChange()">
+                                            <option value="">-- Select from configured pairs --</option>
+                                            {% for pair in config.pairs %}
+                                            <option value="{{ pair.symbol }}">{{ pair.symbol }}</option>
+                                            {% endfor %}
+                                            <option value="custom">Custom Symbol...</option>
+                                        </select>
+                                    </div>
+                                    <input type="text" class="form-control mt-2 d-none" name="custom_symbol" id="custom-symbol" 
+                                           placeholder="Enter symbol (e.g., ADAUSDT)">
                                 </div>
                                 
                                 <div class="mb-3">
-                                    <label for="fetch-timeframe" class="form-label">Timeframe</label>
-                                    <select class="form-control" name="timeframe" id="fetch-timeframe">
-                                        <option value="15m" selected>15 minutes</option>
-                                        <option value="1h">1 hour</option>
-                                        <option value="4h">4 hours</option>
-                                    </select>
+                                    <label for="fetch-timeframes" class="form-label">Timeframes</label>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="1m" id="tf-1m">
+                                                <label class="form-check-label" for="tf-1m">1 minute</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="5m" id="tf-5m">
+                                                <label class="form-check-label" for="tf-5m">5 minutes</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="15m" id="tf-15m" checked>
+                                                <label class="form-check-label" for="tf-15m">15 minutes</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="30m" id="tf-30m">
+                                                <label class="form-check-label" for="tf-30m">30 minutes</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="1h" id="tf-1h">
+                                                <label class="form-check-label" for="tf-1h">1 hour</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="4h" id="tf-4h" checked>
+                                                <label class="form-check-label" for="tf-4h">4 hours</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="1d" id="tf-1d">
+                                                <label class="form-check-label" for="tf-1d">1 day</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="timeframes" value="1w" id="tf-1w">
+                                                <label class="form-check-label" for="tf-1w">1 week</label>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 
                                 <div class="row">
@@ -685,6 +724,24 @@
                 setTimeout(populateCSVFiles, 100);
             }
         });
+
+        // Handle symbol selection change
+        function handleSymbolChange() {
+            const symbolSelect = document.getElementById('fetch-symbol');
+            const customSymbolInput = document.getElementById('custom-symbol');
+            
+            if (symbolSelect.value === 'custom') {
+                customSymbolInput.classList.remove('d-none');
+                customSymbolInput.required = true;
+                symbolSelect.name = '';  // Remove name so it's not submitted
+                customSymbolInput.name = 'symbol';  // Make custom input the symbol field
+            } else {
+                customSymbolInput.classList.add('d-none');
+                customSymbolInput.required = false;
+                symbolSelect.name = 'symbol';  // Restore name
+                customSymbolInput.name = 'custom_symbol';  // Remove from submission
+            }
+        }
     </script>
 </body>
 </html>

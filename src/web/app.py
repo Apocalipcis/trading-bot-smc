@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+import pandas as pd
 
 # Add project root to path
 project_root = Path(__file__).resolve().parents[2]
@@ -27,6 +28,7 @@ from src.data_downloader import download_crypto_data
 from src.telegram_client import TelegramClient
 from src.data_loader import prepare_data, validate_timeframe_alignment
 from src.signal_generator import generate_signals
+from src.backtester import BacktestValidator
 import os
 import glob
 from datetime import datetime, timedelta
@@ -63,7 +65,24 @@ _load_dotenv()
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+try:
+    # Create logs directory if it doesn't exist
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(logs_dir / 'app.log')
+        ]
+    )
+except Exception as e:
+    # Fallback to basic logging if file logging fails
+    print(f"Warning: Could not set up file logging: {e}")
+    logging.basicConfig(level=logging.INFO)
+    
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -768,14 +787,19 @@ async def run_single_backtest(symbol: str, request: Request):
 # New Backtest API endpoints
 @app.post("/api/backtests/fetch")
 async def fetch_backtest_data(
+    request: Request,
     symbol: str = Form(...),
-    timeframe: str = Form("15m"),
+    timeframes: List[str] = Form([]),
     days: int = Form(30),
     until: Optional[str] = Form(None)
 ):
     """Fetch historical data for backtesting"""
     try:
         symbol = symbol.upper().strip()
+        
+        # If no timeframes selected, use default
+        if not timeframes:
+            timeframes = ["15m", "4h"]
         
         # Convert days to start/end dates
         if until:
@@ -784,25 +808,57 @@ async def fetch_backtest_data(
             end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
         
-        logger.info(f"Fetching {symbol} {timeframe} data from {start_date.date()} to {end_date.date()}")
+        logger.info(f"Fetching {symbol} data for timeframes {timeframes} from {start_date.date()} to {end_date.date()}")
         
-        # Use existing data downloader
-        try:
-            ltf_file, htf_file = download_crypto_data(symbol, days)
+        # Download data for each timeframe
+        downloaded_files = []
+        errors = []
+        
+        for timeframe in timeframes:
+            try:
+                # Use the data downloader for each timeframe
+                from src.data_downloader import download_specific_timeframe
+                filename = await download_specific_timeframe(symbol, timeframe, days, end_date)
+                downloaded_files.append(f"{timeframe}: {filename}")
+                logger.info(f"Downloaded {symbol} {timeframe} data: {filename}")
+            except Exception as e:
+                error_msg = f"{timeframe}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"Failed to download {symbol} {timeframe}: {e}")
+        
+        # Prepare response
+        if downloaded_files and not errors:
+            # All successful
+            files_list = "<br>".join([f"• {f}" for f in downloaded_files])
             return HTMLResponse(f"""
                 <div class="alert alert-success alert-dismissible fade show">
                     <i class="bi bi-check-circle"></i>
-                    <strong>Success!</strong> Downloaded {symbol} data for {days} days.
-                    <br><small>Files: {ltf_file}, {htf_file}</small>
+                    <strong>Success!</strong> Downloaded {symbol} data for {len(timeframes)} timeframes ({days} days).
+                    <br><small>{files_list}</small>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             """)
-        except Exception as e:
-            logger.error(f"Data download failed: {e}")
+        elif downloaded_files and errors:
+            # Partial success
+            files_list = "<br>".join([f"✓ {f}" for f in downloaded_files])
+            errors_list = "<br>".join([f"✗ {e}" for e in errors])
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Partial Success!</strong> Some downloads completed, some failed.
+                    <br><strong>Downloaded:</strong><br><small>{files_list}</small>
+                    <br><strong>Errors:</strong><br><small>{errors_list}</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        else:
+            # All failed
+            errors_list = "<br>".join([f"• {e}" for e in errors])
             return HTMLResponse(f"""
                 <div class="alert alert-danger alert-dismissible fade show">
                     <i class="bi bi-exclamation-triangle"></i>
-                    <strong>Error!</strong> Failed to download {symbol} data: {str(e)}
+                    <strong>Error!</strong> Failed to download {symbol} data for all timeframes.
+                    <br><small>{errors_list}</small>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             """)
@@ -891,7 +947,7 @@ async def delete_backtest_results(symbol: str):
         if not backtest_dir.exists():
             raise HTTPException(status_code=404, detail=f"Backtest results for {symbol} not found")
         
-        # Remove entire directory
+        # Remove entire directory (this will delete both JSON and CSV results)
         import shutil
         shutil.rmtree(backtest_dir)
         
@@ -962,56 +1018,153 @@ async def view_backtest_results(symbol: str, request: Request):
             import json
             data = json.load(f)
         
-        # Extract report data
-        if 'report' in data:
-            report = data['report']
-        else:
-            report = data
-        
-        # Format results for display
-        total_trades = report.get('total_trades', 0)
-        win_rate = report.get('win_rate', 0)
-        profit_factor = report.get('profit_factor', 0)
-        total_pnl = report.get('total_pnl', 0)
-        max_drawdown = report.get('max_drawdown', 0)
-        
-        return HTMLResponse(f"""
-            <div class="modal fade" id="resultsModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Backtest Results: {symbol}</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <h6>Performance Metrics</h6>
-                                    <ul class="list-unstyled">
-                                        <li><strong>Total Trades:</strong> {total_trades}</li>
-                                        <li><strong>Win Rate:</strong> {win_rate:.1f}%</li>
-                                        <li><strong>Profit Factor:</strong> {profit_factor:.2f}</li>
-                                        <li><strong>Total P&L:</strong> ${total_pnl:.2f}</li>
-                                        <li><strong>Max Drawdown:</strong> {max_drawdown:.2f}%</li>
-                                    </ul>
+        # Check if this is a CSV backtest result
+        if data.get('type') == 'csv_backtest':
+            # Format CSV backtest results
+            total_signals = data.get('total_signals', 0)
+            long_signals = data.get('long_signals', 0)
+            short_signals = data.get('short_signals', 0)
+            average_rr = data.get('average_rr', 0)
+            fvg_confluence = data.get('fvg_confluence_signals', 0)
+            timestamp = data.get('timestamp', 'N/A')
+            parameters = data.get('parameters', {})
+            
+            return HTMLResponse(f"""
+                <div class="modal fade" id="resultsModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">CSV Backtest Results: {symbol}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h6>Signal Summary</h6>
+                                        <ul class="list-unstyled">
+                                            <li><strong>Total Signals:</strong> {total_signals}</li>
+                                            <li><strong>Long Signals:</strong> {long_signals}</li>
+                                            <li><strong>Short Signals:</strong> {short_signals}</li>
+                                            <li><strong>Average R/R:</strong> {average_rr:.2f}</li>
+                                            <li><strong>FVG Confluence:</strong> {fvg_confluence}</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6>Parameters</h6>
+                                        <ul class="list-unstyled">
+                                            <li><strong>LTF File:</strong> {parameters.get('ltf_file', 'N/A')}</li>
+                                            <li><strong>HTF File:</strong> {parameters.get('htf_file', 'N/A')}</li>
+                                            <li><strong>Min R/R:</strong> {parameters.get('rr_min', 'N/A')}</li>
+                                            <li><strong>Fractal Left:</strong> {parameters.get('fractal_left', 'N/A')}</li>
+                                            <li><strong>Fractal Right:</strong> {parameters.get('fractal_right', 'N/A')}</li>
+                                            <li><strong>Require FVG:</strong> {parameters.get('require_fvg', 'N/A')}</li>
+                                        </ul>
+                                    </div>
                                 </div>
-                                <div class="col-md-6">
-                                    <h6>Risk Analysis</h6>
-                                    <ul class="list-unstyled">
-                                        <li><strong>Risk Level:</strong> {report.get('risk_level', 'N/A')}</li>
-                                        <li><strong>Recommendation:</strong> {report.get('recommendation', 'N/A')}</li>
-                                        <li><strong>Last Updated:</strong> {data.get('timestamp', 'N/A')}</li>
-                                    </ul>
+                                <div class="row mt-3">
+                                    <div class="col-12">
+                                        <h6>Additional Info</h6>
+                                        <ul class="list-unstyled">
+                                            <li><strong>Last Updated:</strong> {timestamp}</li>
+                                            <li><strong>Type:</strong> CSV Backtest</li>
+                                        </ul>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                <button type="button" class="btn btn-primary" onclick="viewCSVDetailedResults('{symbol}')">
+                                    <i class="bi bi-arrow-up-right-circle"></i> Відкрити детальні результати
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-        """)
+                
+                <script>
+                function viewCSVDetailedResults(symbol) {{
+                    // Закриваємо поточне модальне вікно
+                    const currentModal = document.getElementById('resultsModal');
+                    if (currentModal) {{
+                        const modal = bootstrap.Modal.getInstance(currentModal);
+                        if (modal) modal.hide();
+                    }}
+                    
+                    // Завантажуємо детальні результати
+                    fetch(`/api/backtests/csv/detailed/${{symbol}}`)
+                        .then(response => response.text())
+                        .then(html => {{
+                            // Додаємо нове модальне вікно
+                            document.body.insertAdjacentHTML('beforeend', html);
+                            
+                            // Показуємо його
+                            setTimeout(() => {{
+                                const detailedModal = document.getElementById('csvDetailedModal');
+                                if (detailedModal) {{
+                                    const modal = new bootstrap.Modal(detailedModal);
+                                    modal.show();
+                                }}
+                            }}, 100);
+                        }})
+                        .catch(error => {{
+                            console.error('Error:', error);
+                            alert('Failed to load detailed results');
+                        }});
+                }}
+                </script>
+            """)
+        else:
+            # Handle regular backtest results
+            # Extract report data
+            if 'report' in data:
+                report = data['report']
+            else:
+                report = data
+            
+            # Format results for display
+            total_trades = report.get('total_trades', 0)
+            win_rate = report.get('win_rate', 0)
+            profit_factor = report.get('profit_factor', 0)
+            total_pnl = report.get('total_pnl', 0)
+            max_drawdown = report.get('max_drawdown', 0)
+            
+            return HTMLResponse(f"""
+                <div class="modal fade" id="resultsModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Backtest Results: {symbol}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h6>Performance Metrics</h6>
+                                        <ul class="list-unstyled">
+                                            <li><strong>Total Trades:</strong> {total_trades}</li>
+                                            <li><strong>Win Rate:</strong> {win_rate:.1f}%</li>
+                                            <li><strong>Profit Factor:</strong> {profit_factor:.2f}</li>
+                                            <li><strong>Total P&L:</strong> ${total_pnl:.2f}</li>
+                                            <li><strong>Max Drawdown:</strong> {max_drawdown:.2f}%</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6>Risk Analysis</h6>
+                                        <ul class="list-unstyled">
+                                            <li><strong>Risk Level:</strong> {report.get('risk_level', 'N/A')}</li>
+                                            <li><strong>Recommendation:</strong> {report.get('recommendation', 'N/A')}</li>
+                                            <li><strong>Last Updated:</strong> {data.get('timestamp', 'N/A')}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            """)
         
     except Exception as e:
         logger.error(f"Error viewing results for {symbol}: {e}")
@@ -1045,15 +1198,29 @@ async def get_backtest_history(request: Request):
         # Get backtest results
         backtest_results = []
         if backtest_dir.exists():
+            # Look for results in symbol directories
             for symbol_dir in backtest_dir.iterdir():
                 if symbol_dir.is_dir():
                     latest_file = symbol_dir / "latest_results.json"
                     if latest_file.exists():
                         stat = latest_file.stat()
+                        try:
+                            # Read JSON to get more details
+                            with open(latest_file, 'r', encoding='utf-8') as f:
+                                import json
+                                data = json.load(f)
+                                backtest_type = data.get('type', 'unknown')
+                                total_signals = data.get('total_signals', 0)
+                        except:
+                            backtest_type = 'unknown'
+                            total_signals = 0
+                        
                         backtest_results.append({
                             'symbol': symbol_dir.name,
                             'last_run': datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                            'file_size': f"{stat.st_size / 1024:.1f} KB"
+                            'file_size': f"{stat.st_size / 1024:.1f} KB",
+                            'type': backtest_type,
+                            'total_signals': total_signals
                         })
         
         return templates.TemplateResponse("backtest_results.html", {
@@ -1198,9 +1365,24 @@ async def run_csv_backtest(
 ):
     """Run backtest with CSV files (replaces main.py functionality)"""
     try:
-        # Validate input files exist
-        ltf_path = Path(ltf_file)
-        htf_path = Path(htf_file)
+        # Validate input files exist - look in data/ directory
+        data_dir = Path("data")
+        
+        # Check if data directory exists
+        if not data_dir.exists():
+            raise HTTPException(status_code=400, detail="Data directory not found")
+        
+        ltf_path = data_dir / ltf_file
+        htf_path = data_dir / htf_file
+        
+        # Security check: ensure files are within data directory
+        try:
+            if not ltf_path.resolve().is_relative_to(data_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid LTF file path")
+            if not htf_path.resolve().is_relative_to(data_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid HTF file path")
+        except (ValueError, RuntimeError):
+            raise HTTPException(status_code=400, detail="Invalid file path")
         
         if not ltf_path.exists():
             raise HTTPException(status_code=400, detail=f"LTF file not found: {ltf_file}")
@@ -1208,27 +1390,116 @@ async def run_csv_backtest(
             raise HTTPException(status_code=400, detail=f"HTF file not found: {htf_file}")
         
         logger.info(f"Starting CSV backtest: LTF={ltf_file}, HTF={htf_file}")
+        logger.info(f"File paths: LTF={ltf_path}, HTF={htf_path}")
         
         # Load data
-        df_ltf, df_htf = prepare_data(str(ltf_path), str(htf_path))
+        try:
+            df_ltf, df_htf = prepare_data(str(ltf_path), str(htf_path))
+            logger.info(f"Data loaded: LTF={len(df_ltf)} rows, HTF={len(df_htf)} rows")
+        except Exception as e:
+            logger.error(f"Failed to load data: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load data: {str(e)}")
         
         # Validate timeframe alignment
-        if not validate_timeframe_alignment(df_ltf, df_htf):
-            logger.warning("Timeframe alignment issues detected")
+        try:
+            if not validate_timeframe_alignment(df_ltf, df_htf):
+                logger.warning("Timeframe alignment issues detected")
+        except Exception as e:
+            logger.warning(f"Timeframe validation failed: {e}")
         
         # Generate signals
-        signals = generate_signals(
-            df_ltf=df_ltf,
-            df_htf=df_htf,
-            left=fractal_left,
-            right=fractal_right,
-            rr_min=rr_min
-        )
+        try:
+            signals = generate_signals(
+                df_ltf=df_ltf,
+                df_htf=df_htf,
+                left=fractal_left,
+                right=fractal_right,
+                rr_min=rr_min
+            )
+            logger.info(f"Signals generated: {len(signals)} total")
+        except Exception as e:
+            logger.error(f"Failed to generate signals: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to generate signals: {str(e)}")
+        
+        # Validate signals using BacktestValidator
+        try:
+            if len(signals) > 0:
+                # Initialize validator with $100 position size
+                validator = BacktestValidator(df_ltf, position_size=100.0)
+                trade_results = validator.validate_all_signals(signals)
+                report = validator.generate_report(trade_results)
+                logger.info(f"Backtest validation completed: {len(trade_results)} trades validated")
+            else:
+                trade_results = []
+                report = {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0,
+                    'total_pnl': 0,
+                    'profit_factor': 0,
+                    'avg_duration_hours': 0
+                }
+        except Exception as e:
+            logger.error(f"Failed to validate signals: {e}")
+            # Fallback to basic results if validation fails
+            trade_results = []
+            report = {
+                'total_trades': len(signals),
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'total_pnl': 0,
+                'profit_factor': 0,
+                'avg_duration_hours': 0
+            }
         
         # Save results
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"backtest_results/csv_backtest_{timestamp}.csv"
-        signals.to_csv(output_file, index=False)
+        try:
+            # Extract symbol from filename if possible
+            symbol_from_ltf = ltf_file.replace('.csv', '').split('_')[0].upper() if '_' in ltf_file else 'UNKNOWN'
+            
+            # Create symbol directory in backtest_results
+            backtest_dir = Path("backtest_results")
+            symbol_dir = backtest_dir / symbol_from_ltf
+            symbol_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save CSV results
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_file = symbol_dir / f"csv_backtest_{timestamp}.csv"
+            signals.to_csv(csv_file, index=False)
+            
+            # Also save a summary JSON file for consistency with other backtests
+            summary_data = {
+                "timestamp": timestamp,
+                "type": "csv_backtest",
+                "symbol": symbol_from_ltf,
+                "total_signals": len(signals),
+                "long_signals": len(signals[signals['direction'] == 'LONG']) if len(signals) > 0 else 0,
+                "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
+                "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
+                "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
+                "parameters": {
+                    "ltf_file": ltf_file,
+                    "htf_file": htf_file,
+                    "rr_min": rr_min,
+                    "fractal_left": fractal_left,
+                    "fractal_right": fractal_right,
+                    "require_fvg": require_fvg
+                }
+            }
+            
+            # Save summary JSON
+            import json
+            summary_file = symbol_dir / "latest_results.json"
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summary_data, f, indent=2, default=str)
+            
+            logger.info(f"Results saved to: {symbol_dir}")
+            output_file = csv_file  # Use CSV file as main output for backward compatibility
+        except Exception as e:
+            logger.error(f"Failed to save results: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save results: {str(e)}")
         
         # Prepare response
         result = {
@@ -1238,7 +1509,7 @@ async def run_csv_backtest(
             "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
             "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
             "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
-            "output_file": output_file,
+            "output_file": str(output_file),
             "parameters": {
                 "ltf_file": ltf_file,
                 "htf_file": htf_file,
@@ -1250,10 +1521,18 @@ async def run_csv_backtest(
         }
         
         logger.info(f"CSV backtest completed: {result['total_signals']} signals generated")
-        return JSONResponse(content=result)
+        
+        # Return HTML results instead of JSON
+        try:
+            html_result = render_backtest_results_html(signals, trade_results, report)
+            return HTMLResponse(content=html_result)
+        except Exception as e:
+            logger.error(f"Failed to render HTML: {e}")
+            # Fallback to JSON if HTML rendering fails
+            return JSONResponse(content=result)
         
     except Exception as e:
-        logger.error(f"CSV backtest error: {e}")
+        logger.error(f"CSV backtest error: {e}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}
@@ -1354,6 +1633,476 @@ async def get_csv_backtest_form():
             </div>
         </div>
     """)
+
+
+def render_backtest_results_html(signals: pd.DataFrame, trade_results: List, report: Dict) -> str:
+    """Створює красивий HTML для результатів бектесту"""
+    
+    # Генеруємо рядки таблиці
+    table_rows = ""
+    for i, result in enumerate(trade_results):
+        # Знаходимо відповідний сигнал
+        signal = signals.iloc[i] if i < len(signals) else None
+        
+        # Визначаємо колір та іконку для результату
+        if result.pnl > 0:
+            result_class = "text-success"
+            result_icon = "✅"
+            result_text = "WIN"
+        else:
+            result_class = "text-danger"
+            result_icon = "❌"
+            result_text = "LOSS"
+        
+        # Форматуємо час
+        timestamp = signal['timestamp'] if signal is not None else "N/A"
+        if hasattr(timestamp, 'strftime'):
+            timestamp = timestamp.strftime("%Y-%m-%d %H:%M")
+        
+        # Безпечне форматування значень
+        entry_price = f"${signal['entry']:,.2f}" if signal is not None and signal['entry'] is not None else "$0.00"
+        sl_price = f"${signal['sl']:,.2f}" if signal is not None and signal['sl'] is not None else "$0.00"
+        tp_price = f"${signal['tp']:,.2f}" if signal is not None and signal['tp'] is not None else "$0.00"
+        rr_value = f"{signal['rr']:.2f}" if signal is not None and signal['rr'] is not None else "0.00"
+        
+        table_rows += f"""
+        <tr>
+            <td>{timestamp}</td>
+            <td><span class="badge bg-primary">{signal['direction'] if signal is not None else 'N/A'}</span></td>
+            <td>{entry_price}</td>
+            <td>{sl_price}</td>
+            <td>{tp_price}</td>
+            <td><span class="badge bg-secondary">{result.exit_reason}</span></td>
+            <td class="{result_class}">${result.pnl:.2f}</td>
+            <td class="{result_class}">{result.pnl_percent:.2f}%</td>
+            <td>{rr_value}</td>
+        </tr>
+        """
+    
+    html = f"""
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="bi bi-graph-up"></i> Результати бектесту (Позиція: $100)</h5>
+        </div>
+        <div class="card-body">
+            <!-- Загальна статистика -->
+            <div class="row mb-3">
+                <div class="col-md-2">
+                    <div class="text-center">
+                        <h4 class="text-success">{report.get('winning_trades', 0)}</h4>
+                        <small>Виграшні</small>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="text-center">
+                        <h4 class="text-danger">{report.get('losing_trades', 0)}</h4>
+                        <small>Програшні</small>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="text-center">
+                        <h4 class="text-primary">{report.get('win_rate', 0):.1f}%</h4>
+                        <small>Вінрейт</small>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="text-center">
+                        <h4 class="text-info">${report.get('total_pnl', 0):.2f}</h4>
+                        <small>Загальний P&L</small>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="text-center">
+                        <h4 class="text-warning">{report.get('profit_factor', 0):.2f}</h4>
+                        <small>Profit Factor</small>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="text-center">
+                        <h4 class="text-secondary">{report.get('avg_duration_hours', 0):.1f}h</h4>
+                        <small>Серед. тривалість</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Таблиця сигналів -->
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Час</th>
+                            <th>Позиція</th>
+                            <th>Entry</th>
+                            <th>Stop Loss</th>
+                            <th>Take Profit</th>
+                            <th>Exit</th>
+                            <th>P&L ($)</th>
+                            <th>P&L (%)</th>
+                            <th>RR</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {table_rows}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Додаткова інформація -->
+            <div class="mt-3">
+                <small class="text-muted">
+                    <strong>Загальна статистика:</strong> 
+                    {report.get('total_trades', 0)} сигналів | 
+                    Вінрейт: {report.get('win_rate', 0):.1f}% | 
+                    Загальний P&L: ${report.get('total_pnl', 0):.2f} | 
+                    Profit Factor: {report.get('profit_factor', 0):.2f}
+                </small>
+            </div>
+            
+            <!-- Кнопка для відкриття детального модального вікна -->
+            <div class="text-center mt-3">
+                <button class="btn btn-primary" onclick="viewDetailedResults()">
+                    <i class="bi bi-arrow-up-right-circle"></i> Відкрити детальні результати
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Модальне вікно з детальними результатами -->
+    <div class="modal fade" id="detailedResultsModal" tabindex="-1" aria-labelledby="detailedResultsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="detailedResultsModalLabel">
+                        <i class="bi bi-graph-up"></i> Детальні результати бектесту
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Загальна статистика -->
+                    <div class="row mb-4">
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-success mb-1">{report.get('winning_trades', 0)}</h4>
+                                <small class="text-muted">Виграшні</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-danger mb-1">{report.get('losing_trades', 0)}</h4>
+                                <small class="text-muted">Програшні</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-primary mb-1">{report.get('win_rate', 0):.1f}%</h4>
+                                <small class="text-muted">Вінрейт</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-info mb-1">${report.get('total_pnl', 0):.2f}</h4>
+                                <small class="text-muted">Загальний P&L</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-warning mb-1">{report.get('profit_factor', 0):.2f}</h4>
+                                <small class="text-muted">Profit Factor</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-secondary mb-1">{report.get('avg_duration_hours', 0):.1f}h</h4>
+                                <small class="text-muted">Серед. тривалість</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Таблиця сигналів -->
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Час</th>
+                                    <th>Позиція</th>
+                                    <th>Entry</th>
+                                    <th>Stop Loss</th>
+                                    <th>Take Profit</th>
+                                    <th>Exit</th>
+                                    <th>P&L ($)</th>
+                                    <th>P&L (%)</th>
+                                    <th>RR</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {table_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрити</button>
+                    <button type="button" class="btn btn-primary" onclick="exportToCSV()">
+                        <i class="bi bi-download"></i> Експорт в CSV
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+    function viewDetailedResults() {{
+        const modal = new bootstrap.Modal(document.getElementById('detailedResultsModal'));
+        modal.show();
+    }}
+    
+    function exportToCSV() {{
+        // Тут можна додати логіку експорту в CSV
+        alert('Функція експорту буде додана пізніше');
+    }}
+    </script>
+    """
+    return html
+
+
+@app.get("/api/backtests/csv/detailed/{symbol}")
+async def get_csv_detailed_results(symbol: str, request: Request):
+    """Get detailed CSV backtest results with full table"""
+    try:
+        symbol = symbol.upper()
+        results_file = Path("backtest_results") / symbol / "latest_results.json"
+        
+        if not results_file.exists():
+            raise HTTPException(status_code=404, detail=f"Results for {symbol} not found")
+        
+        # Read and parse results
+        with open(results_file, 'r', encoding='utf-8') as f:
+            import json
+            data = json.load(f)
+        
+        # Check if this is a CSV backtest result
+        if data.get('type') != 'csv_backtest':
+            raise HTTPException(status_code=400, detail=f"Not a CSV backtest result for {symbol}")
+        
+        # Find the latest CSV file
+        symbol_dir = Path("backtest_results") / symbol
+        csv_files = list(symbol_dir.glob("csv_backtest_*.csv"))
+        
+        if not csv_files:
+            raise HTTPException(status_code=404, detail=f"CSV file not found for {symbol}")
+        
+        # Get the most recent CSV file
+        latest_csv = max(csv_files, key=lambda x: x.stat().st_mtime)
+        
+        # Load CSV data
+        import pandas as pd
+        signals_df = pd.read_csv(latest_csv)
+        
+        # Generate table rows
+        table_rows = ""
+        for _, signal in signals_df.iterrows():
+            # Format timestamp
+            timestamp = signal.get('timestamp', 'N/A')
+            if pd.notna(timestamp) and hasattr(timestamp, 'strftime'):
+                timestamp = timestamp.strftime("%Y-%m-%d %H:%M")
+            
+            # Format prices
+            entry_price = f"${signal.get('entry', 0):,.2f}" if pd.notna(signal.get('entry')) else "$0.00"
+            sl_price = f"${signal.get('sl', 0):,.2f}" if pd.notna(signal.get('sl')) else "$0.00"
+            tp_price = f"${signal.get('tp', 0):,.2f}" if pd.notna(signal.get('tp')) else "$0.00"
+            rr_value = f"{signal.get('rr', 0):.2f}" if pd.notna(signal.get('rr')) else "0.00"
+            
+            table_rows += f"""
+            <tr>
+                <td>{timestamp}</td>
+                <td><span class="badge bg-primary">{signal.get('direction', 'N/A')}</span></td>
+                <td>{entry_price}</td>
+                <td>{sl_price}</td>
+                <td>{tp_price}</td>
+                <td><span class="badge bg-secondary">Manual</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-muted">-</td>
+                <td>{rr_value}</td>
+            </tr>
+            """
+        
+        # Get summary data
+        total_signals = data.get('total_signals', 0)
+        long_signals = data.get('long_signals', 0)
+        short_signals = data.get('short_signals', 0)
+        average_rr = data.get('average_rr', 0)
+        fvg_confluence = data.get('fvg_confluence_signals', 0)
+        timestamp = data.get('timestamp', 'N/A')
+        parameters = data.get('parameters', {})
+        
+        return HTMLResponse(f"""
+            <div class="modal fade" id="csvDetailedModal" tabindex="-1" aria-labelledby="csvDetailedModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-xl">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="csvDetailedModalLabel">
+                                <i class="bi bi-graph-up"></i> Детальні результати CSV бектесту: {symbol}
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <!-- Загальна статистика -->
+                            <div class="row mb-4">
+                                <div class="col-md-2">
+                                    <div class="text-center p-3 bg-light rounded">
+                                        <h4 class="text-primary mb-1">{total_signals}</h4>
+                                        <small class="text-muted">Всього сигналів</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="text-center p-3 bg-light rounded">
+                                        <h4 class="text-success mb-1">{long_signals}</h4>
+                                        <small class="text-muted">Long сигналів</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="text-center p-3 bg-light rounded">
+                                        <h4 class="text-danger mb-1">{short_signals}</h4>
+                                        <small class="text-muted">Short сигналів</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="text-center p-3 bg-light rounded">
+                                        <h4 class="text-info mb-1">{average_rr:.2f}</h4>
+                                        <small class="text-muted">Середній R/R</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="text-center p-3 bg-light rounded">
+                                        <h4 class="text-warning mb-1">{fvg_confluence}</h4>
+                                        <small class="text-muted">FVG конвергенція</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="text-center p-3 bg-light rounded">
+                                        <h4 class="text-secondary mb-1">{timestamp}</h4>
+                                        <small class="text-muted">Оновлено</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Параметри бектесту -->
+                            <div class="row mb-4">
+                                <div class="col-12">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="bi bi-gear"></i> Параметри бектесту</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row">
+                                                <div class="col-md-3">
+                                                    <strong>LTF файл:</strong><br>
+                                                    <small class="text-muted">{parameters.get('ltf_file', 'N/A')}</small>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <strong>HTF файл:</strong><br>
+                                                    <small class="text-muted">{parameters.get('htf_file', 'N/A')}</small>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <strong>Мін. R/R:</strong><br>
+                                                    <small class="text-muted">{parameters.get('rr_min', 'N/A')}</small>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <strong>Fractal:</strong><br>
+                                                    <small class="text-muted">{parameters.get('fractal_left', 'N/A')}/{parameters.get('fractal_right', 'N/A')}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Таблиця сигналів -->
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Час</th>
+                                            <th>Позиція</th>
+                                            <th>Entry</th>
+                                            <th>Stop Loss</th>
+                                            <th>Take Profit</th>
+                                            <th>Exit</th>
+                                            <th>P&L ($)</th>
+                                            <th>P&L (%)</th>
+                                            <th>RR</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {table_rows}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрити</button>
+                            <button type="button" class="btn btn-primary" onclick="downloadCSVFile('{symbol}')">
+                                <i class="bi bi-download"></i> Завантажити CSV
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <script>
+            function downloadCSVFile(symbol) {{
+                // Завантажуємо CSV файл
+                const link = document.createElement('a');
+                link.href = `/api/backtests/csv/download/${{symbol}}`;
+                link.download = `${{symbol}}_backtest_results.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }}
+            </script>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error getting detailed CSV results for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to load detailed results for {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+@app.get("/api/backtests/csv/download/{symbol}")
+async def download_csv_file(symbol: str):
+    """Download CSV file for a symbol"""
+    try:
+        symbol = symbol.upper()
+        symbol_dir = Path("backtest_results") / symbol
+        
+        if not symbol_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Results directory for {symbol} not found")
+        
+        # Find the latest CSV file
+        csv_files = list(symbol_dir.glob("csv_backtest_*.csv"))
+        
+        if not csv_files:
+            raise HTTPException(status_code=404, detail=f"CSV file not found for {symbol}")
+        
+        # Get the most recent CSV file
+        latest_csv = max(csv_files, key=lambda x: x.stat().st_mtime)
+        
+        # Return file as response
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=str(latest_csv),
+            filename=f"{symbol}_backtest_results.csv",
+            media_type="text/csv"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading CSV for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

@@ -26,6 +26,8 @@ class TradeResult:
     exit_reason: str  # 'SL', 'TP', 'NO_EXIT', 'NO_DATA'
     exit_time: str
     pnl: float
+    pnl_usd: float      # P&L in USD based on position size
+    pnl_percent: float  # P&L in percentage
     duration_minutes: int
     max_favorable: float  # Best price reached
     max_adverse: float    # Worst price reached
@@ -33,16 +35,18 @@ class TradeResult:
 class BacktestValidator:
     """Validates trading signals against actual price movements"""
     
-    def __init__(self, price_data: pd.DataFrame):
+    def __init__(self, price_data: pd.DataFrame, position_size: float = 100.0):
         """
-        Initialize with price data
+        Initialize with price data and fixed position size
         
         Args:
             price_data: DataFrame with OHLC data
+            position_size: Fixed position size in USD (default: $100)
         """
         self.price_data = price_data.copy()
         self.price_data['timestamp'] = pd.to_datetime(self.price_data['timestamp']).dt.tz_localize(None)
         self.price_data = self.price_data.sort_values('timestamp').reset_index(drop=True)
+        self.position_size = position_size
     
     def validate_signal(self, signal: Dict) -> TradeResult:
         """
@@ -80,6 +84,8 @@ class BacktestValidator:
                 exit_reason='NO_DATA',
                 exit_time=signal['timestamp'],
                 pnl=0.0,
+                pnl_usd=0.0,
+                pnl_percent=0.0,
                 duration_minutes=0,
                 max_favorable=entry_price,
                 max_adverse=entry_price
@@ -106,6 +112,8 @@ class BacktestValidator:
                     candle_timestamp = pd.to_datetime(candle['timestamp'])
                     duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = sl_price - entry_price
+                    pnl_percent = (pnl / entry_price) * 100
+                    pnl_usd = pnl_percent * self.position_size / 100
                     return TradeResult(
                         timestamp=signal['timestamp'],
                         direction=direction,
@@ -116,6 +124,8 @@ class BacktestValidator:
                         exit_reason='SL',
                         exit_time=str(candle['timestamp']),
                         pnl=pnl,
+                        pnl_usd=pnl_usd,
+                        pnl_percent=pnl_percent,
                         duration_minutes=duration,
                         max_favorable=max_favorable,
                         max_adverse=max_adverse
@@ -127,6 +137,8 @@ class BacktestValidator:
                     candle_timestamp = pd.to_datetime(candle['timestamp'])
                     duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = tp_price - entry_price
+                    pnl_percent = (pnl / entry_price) * 100
+                    pnl_usd = pnl_percent * self.position_size / 100
                     return TradeResult(
                         timestamp=signal['timestamp'],
                         direction=direction,
@@ -137,6 +149,8 @@ class BacktestValidator:
                         exit_reason='TP',
                         exit_time=str(candle['timestamp']),
                         pnl=pnl,
+                        pnl_usd=pnl_usd,
+                        pnl_percent=pnl_percent,
                         duration_minutes=duration,
                         max_favorable=max_favorable,
                         max_adverse=max_adverse
@@ -153,6 +167,8 @@ class BacktestValidator:
                     candle_timestamp = pd.to_datetime(candle['timestamp'])
                     duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = entry_price - sl_price
+                    pnl_percent = (pnl / entry_price) * 100
+                    pnl_usd = pnl_percent * self.position_size / 100
                     return TradeResult(
                         timestamp=signal['timestamp'],
                         direction=direction,
@@ -163,6 +179,8 @@ class BacktestValidator:
                         exit_reason='SL',
                         exit_time=str(candle['timestamp']),
                         pnl=pnl,
+                        pnl_usd=pnl_usd,
+                        pnl_percent=pnl_percent,
                         duration_minutes=duration,
                         max_favorable=max_favorable,
                         max_adverse=max_adverse
@@ -174,6 +192,8 @@ class BacktestValidator:
                     candle_timestamp = pd.to_datetime(candle['timestamp'])
                     duration = int((candle_timestamp - entry_time).total_seconds() / 60)
                     pnl = entry_price - tp_price
+                    pnl_percent = (pnl / entry_price) * 100
+                    pnl_usd = pnl_percent * self.position_size / 100
                     return TradeResult(
                         timestamp=signal['timestamp'],
                         direction=direction,
@@ -184,6 +204,8 @@ class BacktestValidator:
                         exit_reason='TP',
                         exit_time=str(candle['timestamp']),
                         pnl=pnl,
+                        pnl_usd=pnl_usd,
+                        pnl_percent=pnl_percent,
                         duration_minutes=duration,
                         max_favorable=max_favorable,
                         max_adverse=max_adverse
@@ -201,6 +223,10 @@ class BacktestValidator:
         else:
             pnl = entry_price - final_price
         
+        # Calculate P&L metrics for NO_EXIT case
+        pnl_percent = (pnl / entry_price) * 100
+        pnl_usd = pnl_percent * self.position_size / 100
+        
         return TradeResult(
             timestamp=signal['timestamp'],
             direction=direction,
@@ -211,6 +237,8 @@ class BacktestValidator:
             exit_reason='NO_EXIT',
             exit_time=str(final_candle['timestamp']),
             pnl=pnl,
+            pnl_usd=pnl_usd,
+            pnl_percent=pnl_percent,
             duration_minutes=duration,
             max_favorable=max_favorable,
             max_adverse=max_adverse
@@ -245,9 +273,12 @@ class BacktestValidator:
         no_exit_trades = [r for r in results if r.exit_reason == 'NO_EXIT']
         
         total_pnl = sum(r.pnl for r in results)
+        total_pnl_usd = sum(r.pnl_usd for r in results)
         win_rate = len(winning_trades) / total_trades * 100
         avg_win = np.mean([r.pnl for r in winning_trades]) if winning_trades else 0
         avg_loss = np.mean([r.pnl for r in losing_trades]) if losing_trades else 0
+        avg_win_usd = np.mean([r.pnl_usd for r in winning_trades]) if winning_trades else 0
+        avg_loss_usd = np.mean([r.pnl_usd for r in losing_trades]) if losing_trades else 0
         
         # Duration analysis
         completed_trades = [r for r in results if r.exit_reason in ['SL', 'TP']]
@@ -259,8 +290,11 @@ class BacktestValidator:
             'losing_trades': len(losing_trades),
             'win_rate': win_rate,
             'total_pnl': total_pnl,
+            'total_pnl_usd': total_pnl_usd,
             'avg_win': avg_win,
             'avg_loss': avg_loss,
+            'avg_win_usd': avg_win_usd,
+            'avg_loss_usd': avg_loss_usd,
             'profit_factor': abs(avg_win / avg_loss) if avg_loss != 0 else float('inf'),
             'sl_hits': len(sl_trades),
             'tp_hits': len(tp_trades),
