@@ -48,12 +48,13 @@ class PairWorker:
             logger.warning(f"Worker for {self.symbol} is already running")
             return
         
+        logger.info(f"Starting worker for {self.symbol}")
         self.stop_event.clear()
         self.status.status = 'starting'
         self._notify_status_callbacks()
         
         self.task = asyncio.create_task(self._run())
-        logger.info(f"Started worker for {self.symbol}")
+        logger.info(f"Worker task created for {self.symbol}")
     
     async def stop(self):
         """Stop the pair worker"""
@@ -79,24 +80,37 @@ class PairWorker:
     async def _run(self):
         """Main worker loop"""
         try:
+            logger.info(f"Worker {self.symbol} entering main loop")
             self.status.status = 'running'
             self._notify_status_callbacks()
             
             # Initial data fetch
+            logger.info(f"Fetching initial data for {self.symbol}")
             await self._fetch_initial_data()
+            logger.info(f"Initial data fetched for {self.symbol}: LTF={len(self.ltf_candles)}, HTF={len(self.htf_candles)}")
             
             # Main loop
+            iteration = 0
             while not self.stop_event.is_set():
                 try:
+                    iteration += 1
+                    logger.info(f"Worker {self.symbol} iteration {iteration}")
+                    
                     # Update data
                     await self._update_data()
+                    logger.info(f"Data updated for {self.symbol}: LTF={len(self.ltf_candles)}, HTF={len(self.htf_candles)}")
                     
                     # Generate signals
                     if len(self.ltf_candles) >= 50 and len(self.htf_candles) >= 20:
+                        logger.info(f"Generating signals for {self.symbol} - LTF: {len(self.ltf_candles)}, HTF: {len(self.htf_candles)}")
                         signals = await self.strategy.generate_signals(self.ltf_candles, self.htf_candles)
                         
+                        logger.info(f"Generated {len(signals)} signals for {self.symbol}")
                         for signal in signals:
+                            logger.info(f"Notifying signal callbacks for {self.symbol}: {signal.direction} at {signal.entry}")
                             self._notify_signal_callbacks(signal)
+                    else:
+                        logger.debug(f"Insufficient data for {self.symbol}: LTF={len(self.ltf_candles)}, HTF={len(self.htf_candles)}")
                     
                     # Update status
                     self.status.current_price = await self.gateway.get_current_price(self.symbol)
@@ -106,6 +120,7 @@ class PairWorker:
                     self._notify_status_callbacks()
                     
                     # Wait before next iteration
+                    logger.info(f"Worker {self.symbol} sleeping for 30 seconds")
                     await asyncio.sleep(30)  # 30 seconds between updates
                     
                 except Exception as e:
@@ -129,9 +144,14 @@ class PairWorker:
     async def _fetch_initial_data(self):
         """Fetch initial historical data"""
         try:
+            logger.info(f"Fetching initial LTF data for {self.symbol}")
             # Fetch LTF and HTF data
             self.ltf_candles = await self.gateway.fetch_candles(self.symbol, '15m', 500)
+            logger.info(f"Fetched {len(self.ltf_candles)} LTF candles for {self.symbol}")
+            
+            logger.info(f"Fetching initial HTF data for {self.symbol}")
             self.htf_candles = await self.gateway.fetch_candles(self.symbol, '4h', 200)
+            logger.info(f"Fetched {len(self.htf_candles)} HTF candles for {self.symbol}")
             
             logger.info(f"Fetched initial data for {self.symbol}: LTF={len(self.ltf_candles)}, HTF={len(self.htf_candles)}")
             
@@ -142,15 +162,21 @@ class PairWorker:
     async def _update_data(self):
         """Update candlestick data"""
         try:
+            logger.info(f"Updating data for {self.symbol}")
             # Fetch latest candles (just a few to update)
             new_ltf = await self.gateway.fetch_candles(self.symbol, '15m', 50)
+            logger.info(f"Fetched {len(new_ltf) if new_ltf else 0} new LTF candles for {self.symbol}")
+            
             new_htf = await self.gateway.fetch_candles(self.symbol, '4h', 20)
+            logger.info(f"Fetched {len(new_htf) if new_htf else 0} new HTF candles for {self.symbol}")
             
             # Update candle lists (keep last 500 LTF, 200 HTF)
             if new_ltf:
                 self.ltf_candles = new_ltf[-500:]
+                logger.info(f"Updated LTF candles for {self.symbol}: {len(self.ltf_candles)} total")
             if new_htf:
                 self.htf_candles = new_htf[-200:]
+                logger.info(f"Updated HTF candles for {self.symbol}: {len(self.htf_candles)} total")
                 
         except Exception as e:
             logger.error(f"Failed to update data for {self.symbol}: {e}")
@@ -165,11 +191,14 @@ class PairWorker:
     
     def _notify_signal_callbacks(self, signal: Signal):
         """Notify all signal callbacks"""
-        for callback in self.signal_callbacks:
+        logger.info(f"Notifying {len(self.signal_callbacks)} signal callbacks for {self.symbol}")
+        for i, callback in enumerate(self.signal_callbacks):
             try:
+                logger.info(f"Calling signal callback {i+1} for {self.symbol}")
                 callback(signal)
+                logger.info(f"Signal callback {i+1} completed for {self.symbol}")
             except Exception as e:
-                logger.error(f"Error in signal callback: {e}")
+                logger.error(f"Error in signal callback {i+1} for {self.symbol}: {e}")
     
     def _notify_status_callbacks(self):
         """Notify all status callbacks"""
@@ -204,16 +233,23 @@ class PairManager:
     async def start(self):
         """Start the pair manager"""
         logger.info("Starting PairManager")
+        logger.info(f"Total pairs in config: {len(self.config.pairs)}")
+        logger.info(f"Enabled pairs: {[p.symbol for p in self.config.get_enabled_pairs()]}")
         
         # Create workers for all configured pairs
         for pair_config in self.config.pairs:
+            logger.info(f"Creating worker for {pair_config.symbol} (enabled: {pair_config.enabled})")
             await self._create_worker(pair_config)
+        
+        logger.info(f"Created {len(self.workers)} workers")
         
         # Start enabled pairs
         await self._start_enabled_pairs()
         
         # Start backtest queue processor
         asyncio.create_task(self._process_backtest_queue())
+        
+        logger.info("PairManager started successfully")
         
     async def stop(self):
         """Stop all workers and backtests"""
@@ -298,6 +334,7 @@ class PairManager:
             return
         
         try:
+            logger.info(f"Creating strategy for {symbol} with strategy: {pair_config.strategy}")
             # Create strategy
             strategy = StrategyFactory.create_strategy(
                 pair_config.strategy, 
@@ -305,16 +342,18 @@ class PairManager:
                 pair_config
             )
             
+            logger.info(f"Creating worker for {symbol}")
             # Create worker
             worker = PairWorker(pair_config, self.gateway, strategy)
             
+            logger.info(f"Adding callbacks for {symbol}")
             # Add callbacks
             worker.add_signal_callback(self._on_signal)
             worker.add_status_callback(self._on_status_update)
             
             self.workers[symbol] = worker
             
-            logger.info(f"Created worker for {symbol}")
+            logger.info(f"Successfully created worker for {symbol}")
             
         except Exception as e:
             logger.error(f"Failed to create worker for {symbol}: {e}")
@@ -363,22 +402,31 @@ class PairManager:
     async def _start_enabled_pairs(self):
         """Start workers for enabled pairs"""
         enabled_pairs = self.config.get_enabled_pairs()
+        logger.info(f"Starting enabled pairs: {[p.symbol for p in enabled_pairs]}")
         
         # Respect concurrent limit
         pairs_to_start = enabled_pairs[:self.config.max_concurrent_pairs]
+        logger.info(f"Pairs to start (within limit): {[p.symbol for p in pairs_to_start]}")
         
         for pair_config in pairs_to_start:
             symbol = pair_config.symbol
             if symbol in self.workers and symbol not in self.running_workers:
                 worker = self.workers[symbol]
+                logger.info(f"Starting worker for {symbol}")
                 await worker.start()
                 self.running_workers.add(symbol)
+                logger.info(f"Worker for {symbol} started successfully")
+            else:
+                logger.info(f"Worker for {symbol} already running or not created")
         
         # Queue remaining pairs
         for pair_config in enabled_pairs[self.config.max_concurrent_pairs:]:
             symbol = pair_config.symbol
             if symbol in self.workers:
                 self.workers[symbol].status.status = 'queued'
+                logger.info(f"Queued worker for {symbol}")
+        
+        logger.info(f"Running workers: {list(self.running_workers)}")
     
     async def _stop_disabled_pairs(self):
         """Stop workers for disabled pairs"""
@@ -468,19 +516,26 @@ class PairManager:
     def _on_signal(self, signal: Signal):
         """Handle signal from worker"""
         logger.info(f"Received signal from {signal.symbol}: {signal.direction} at {signal.entry}")
+        logger.info(f"Signal strategy: {signal.strategy}, confidence: {signal.confidence}")
         
         # Update worker status
         if signal.symbol in self.workers:
             worker = self.workers[signal.symbol]
             worker.status.active_signals += 1
             worker.status.last_signal_time = signal.timestamp
+            logger.info(f"Updated worker status for {signal.symbol}")
+        else:
+            logger.warning(f"No worker found for signal symbol: {signal.symbol}")
         
         # Notify callbacks
-        for callback in self.signal_callbacks:
+        logger.info(f"Notifying {len(self.signal_callbacks)} signal callbacks")
+        for i, callback in enumerate(self.signal_callbacks):
             try:
+                logger.info(f"Calling signal callback {i+1}")
                 callback(signal)
+                logger.info(f"Signal callback {i+1} completed successfully")
             except Exception as e:
-                logger.error(f"Error in signal callback: {e}")
+                logger.error(f"Error in signal callback {i+1}: {e}")
     
     def _on_status_update(self, status: PairStatus):
         """Handle status update from worker"""
