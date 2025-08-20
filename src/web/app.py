@@ -1020,151 +1020,71 @@ async def view_backtest_results(symbol: str, request: Request):
         
         # Check if this is a CSV backtest result
         if data.get('type') == 'csv_backtest':
-            # Format CSV backtest results
-            total_signals = data.get('total_signals', 0)
-            long_signals = data.get('long_signals', 0)
-            short_signals = data.get('short_signals', 0)
-            average_rr = data.get('average_rr', 0)
-            fvg_confluence = data.get('fvg_confluence_signals', 0)
-            timestamp = data.get('timestamp', 'N/A')
+            # Find the latest CSV file and load signals data
+            symbol_dir = Path("backtest_results") / symbol
+            csv_files = list(symbol_dir.glob("csv_backtest_*.csv"))
+            
+            signals = []
+            if csv_files:
+                # Get the most recent CSV file
+                latest_csv = max(csv_files, key=lambda x: x.stat().st_mtime)
+                try:
+                    import pandas as pd
+                    signals_df = pd.read_csv(latest_csv)
+                    signals = signals_df.to_dict('records')
+                except Exception as e:
+                    logger.warning(f"Failed to load CSV data for {symbol}: {e}")
+            
+            # Prepare data for CSV backtest template
+            results = {
+                'total_signals': data.get('total_signals', 0),
+                'long_signals': data.get('long_signals', 0),
+                'short_signals': data.get('short_signals', 0),
+                'average_rr': data.get('average_rr', 0),
+                'fvg_confluence': data.get('fvg_confluence_signals', 0),
+                'timestamp': data.get('timestamp', 'N/A'),
+                'total_pnl': data.get('total_pnl', 0),
+                'winning_trades': data.get('winning_trades', 0),
+                'losing_trades': data.get('losing_trades', 0),
+                'win_rate': data.get('win_rate', 0),
+                'avg_duration_hours': data.get('avg_duration_hours', 0)
+            }
             parameters = data.get('parameters', {})
             
-            return HTMLResponse(f"""
-                <div class="modal fade" id="resultsModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">CSV Backtest Results: {symbol}</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <h6>Signal Summary</h6>
-                                        <ul class="list-unstyled">
-                                            <li><strong>Total Signals:</strong> {total_signals}</li>
-                                            <li><strong>Long Signals:</strong> {long_signals}</li>
-                                            <li><strong>Short Signals:</strong> {short_signals}</li>
-                                            <li><strong>Average R/R:</strong> {average_rr:.2f}</li>
-                                            <li><strong>FVG Confluence:</strong> {fvg_confluence}</li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h6>Parameters</h6>
-                                        <ul class="list-unstyled">
-                                            <li><strong>LTF File:</strong> {parameters.get('ltf_file', 'N/A')}</li>
-                                            <li><strong>HTF File:</strong> {parameters.get('htf_file', 'N/A')}</li>
-                                            <li><strong>Min R/R:</strong> {parameters.get('rr_min', 'N/A')}</li>
-                                            <li><strong>Fractal Left:</strong> {parameters.get('fractal_left', 'N/A')}</li>
-                                            <li><strong>Fractal Right:</strong> {parameters.get('fractal_right', 'N/A')}</li>
-                                            <li><strong>Require FVG:</strong> {parameters.get('require_fvg', 'N/A')}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                                <div class="row mt-3">
-                                    <div class="col-12">
-                                        <h6>Additional Info</h6>
-                                        <ul class="list-unstyled">
-                                            <li><strong>Last Updated:</strong> {timestamp}</li>
-                                            <li><strong>Type:</strong> CSV Backtest</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                <button type="button" class="btn btn-primary" onclick="viewCSVDetailedResults('{symbol}')">
-                                    <i class="bi bi-arrow-up-right-circle"></i> Відкрити детальні результати
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <script>
-                function viewCSVDetailedResults(symbol) {{
-                    // Закриваємо поточне модальне вікно
-                    const currentModal = document.getElementById('resultsModal');
-                    if (currentModal) {{
-                        const modal = bootstrap.Modal.getInstance(currentModal);
-                        if (modal) modal.hide();
-                    }}
-                    
-                    // Завантажуємо детальні результати
-                    fetch(`/api/backtests/csv/detailed/${{symbol}}`)
-                        .then(response => response.text())
-                        .then(html => {{
-                            // Додаємо нове модальне вікно
-                            document.body.insertAdjacentHTML('beforeend', html);
-                            
-                            // Показуємо його
-                            setTimeout(() => {{
-                                const detailedModal = document.getElementById('csvDetailedModal');
-                                if (detailedModal) {{
-                                    const modal = new bootstrap.Modal(detailedModal);
-                                    modal.show();
-                                }}
-                            }}, 100);
-                        }})
-                        .catch(error => {{
-                            console.error('Error:', error);
-                            alert('Failed to load detailed results');
-                        }});
-                }}
-                </script>
-            """)
+            return templates.TemplateResponse("backtest_results_modal.html", {
+                "request": request,
+                "symbol": symbol,
+                "backtest_type": "csv_backtest",
+                "results": results,
+                "parameters": parameters,
+                "signals": signals
+            })
         else:
             # Handle regular backtest results
-            # Extract report data
             if 'report' in data:
                 report = data['report']
             else:
                 report = data
             
-            # Format results for display
-            total_trades = report.get('total_trades', 0)
-            win_rate = report.get('win_rate', 0)
-            profit_factor = report.get('profit_factor', 0)
-            total_pnl = report.get('total_pnl', 0)
-            max_drawdown = report.get('max_drawdown', 0)
+            # Prepare data for regular backtest template
+            results = {
+                'total_trades': report.get('total_trades', 0),
+                'win_rate': report.get('win_rate', 0),
+                'profit_factor': report.get('profit_factor', 0),
+                'total_pnl': report.get('total_pnl', 0),
+                'max_drawdown': report.get('max_drawdown', 0),
+                'risk_level': report.get('risk_level', 'N/A'),
+                'recommendation': report.get('recommendation', 'N/A'),
+                'timestamp': data.get('timestamp', 'N/A')
+            }
             
-            return HTMLResponse(f"""
-                <div class="modal fade" id="resultsModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Backtest Results: {symbol}</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <h6>Performance Metrics</h6>
-                                        <ul class="list-unstyled">
-                                            <li><strong>Total Trades:</strong> {total_trades}</li>
-                                            <li><strong>Win Rate:</strong> {win_rate:.1f}%</li>
-                                            <li><strong>Profit Factor:</strong> {profit_factor:.2f}</li>
-                                            <li><strong>Total P&L:</strong> ${total_pnl:.2f}</li>
-                                            <li><strong>Max Drawdown:</strong> {max_drawdown:.2f}%</li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h6>Risk Analysis</h6>
-                                        <ul class="list-unstyled">
-                                            <li><strong>Risk Level:</strong> {report.get('risk_level', 'N/A')}</li>
-                                            <li><strong>Recommendation:</strong> {report.get('recommendation', 'N/A')}</li>
-                                            <li><strong>Last Updated:</strong> {data.get('timestamp', 'N/A')}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            """)
+            return templates.TemplateResponse("backtest_results_modal.html", {
+                "request": request,
+                "symbol": symbol,
+                "backtest_type": "regular",
+                "results": results,
+                "parameters": {}
+            })
         
     except Exception as e:
         logger.error(f"Error viewing results for {symbol}: {e}")
@@ -1356,6 +1276,7 @@ async def test_telegram():
 
 @app.post("/api/backtest/csv")
 async def run_csv_backtest(
+    request: Request,
     ltf_file: str = Form(...),
     htf_file: str = Form(...),
     rr_min: float = Form(3.0),
@@ -1479,6 +1400,12 @@ async def run_csv_backtest(
                 "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
                 "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
                 "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
+                # Add P&L statistics
+                "total_pnl": float(signals['pnl'].sum()) if len(signals) > 0 else 0,
+                "winning_trades": len(signals[signals['pnl'] > 0]) if len(signals) > 0 else 0,
+                "losing_trades": len(signals[signals['pnl'] < 0]) if len(signals) > 0 else 0,
+                "win_rate": float(len(signals[signals['pnl'] > 0]) / len(signals) * 100) if len(signals) > 0 else 0,
+                "avg_duration_hours": float(signals['duration_minutes'].mean() / 60) if len(signals) > 0 else 0,
                 "parameters": {
                     "ltf_file": ltf_file,
                     "htf_file": htf_file,
@@ -1509,6 +1436,12 @@ async def run_csv_backtest(
             "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
             "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
             "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
+            # Add P&L statistics
+            "total_pnl": float(signals['pnl'].sum()) if len(signals) > 0 else 0,
+            "winning_trades": len(signals[signals['pnl'] > 0]) if len(signals) > 0 else 0,
+            "losing_trades": len(signals[signals['pnl'] < 0]) if len(signals) > 0 else 0,
+            "win_rate": float(len(signals[signals['pnl'] > 0]) / len(signals) * 100) if len(signals) > 0 else 0,
+            "avg_duration_hours": float(signals['duration_minutes'].mean() / 60) if len(signals) > 0 else 0,
             "output_file": str(output_file),
             "parameters": {
                 "ltf_file": ltf_file,
@@ -1522,13 +1455,17 @@ async def run_csv_backtest(
         
         logger.info(f"CSV backtest completed: {result['total_signals']} signals generated")
         
-        # Return HTML results instead of JSON
+        # Return HTML results using template
         try:
-            html_result = render_backtest_results_html(signals, trade_results, report)
-            return HTMLResponse(content=html_result)
+            return templates.TemplateResponse("backtest_csv_results.html", {
+                "request": request,
+                "signals": signals.to_dict('records'),
+                "trade_results": trade_results,
+                "report": report
+            })
         except Exception as e:
-            logger.error(f"Failed to render HTML: {e}")
-            # Fallback to JSON if HTML rendering fails
+            logger.error(f"Failed to render template: {e}")
+            # Fallback to JSON if template rendering fails
             return JSONResponse(content=result)
         
     except Exception as e:
@@ -1635,442 +1572,10 @@ async def get_csv_backtest_form():
     """)
 
 
-def render_backtest_results_html(signals: pd.DataFrame, trade_results: List, report: Dict) -> str:
-    """Створює красивий HTML для результатів бектесту"""
-    
-    # Генеруємо рядки таблиці
-    table_rows = ""
-    for i, result in enumerate(trade_results):
-        # Знаходимо відповідний сигнал
-        signal = signals.iloc[i] if i < len(signals) else None
-        
-        # Визначаємо колір та іконку для результату
-        if result.pnl > 0:
-            result_class = "text-success"
-            result_icon = "✅"
-            result_text = "WIN"
-        else:
-            result_class = "text-danger"
-            result_icon = "❌"
-            result_text = "LOSS"
-        
-        # Форматуємо час
-        timestamp = signal['timestamp'] if signal is not None else "N/A"
-        if hasattr(timestamp, 'strftime'):
-            timestamp = timestamp.strftime("%Y-%m-%d %H:%M")
-        
-        # Безпечне форматування значень
-        entry_price = f"${signal['entry']:,.2f}" if signal is not None and signal['entry'] is not None else "$0.00"
-        sl_price = f"${signal['sl']:,.2f}" if signal is not None and signal['sl'] is not None else "$0.00"
-        tp_price = f"${signal['tp']:,.2f}" if signal is not None and signal['tp'] is not None else "$0.00"
-        rr_value = f"{signal['rr']:.2f}" if signal is not None and signal['rr'] is not None else "0.00"
-        
-        table_rows += f"""
-        <tr>
-            <td>{timestamp}</td>
-            <td><span class="badge bg-primary">{signal['direction'] if signal is not None else 'N/A'}</span></td>
-            <td>{entry_price}</td>
-            <td>{sl_price}</td>
-            <td>{tp_price}</td>
-            <td><span class="badge bg-secondary">{result.exit_reason}</span></td>
-            <td class="{result_class}">${result.pnl:.2f}</td>
-            <td class="{result_class}">{result.pnl_percent:.2f}%</td>
-            <td>{rr_value}</td>
-        </tr>
-        """
-    
-    html = f"""
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="bi bi-graph-up"></i> Результати бектесту (Позиція: $100)</h5>
-        </div>
-        <div class="card-body">
-            <!-- Загальна статистика -->
-            <div class="row mb-3">
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h4 class="text-success">{report.get('winning_trades', 0)}</h4>
-                        <small>Виграшні</small>
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h4 class="text-danger">{report.get('losing_trades', 0)}</h4>
-                        <small>Програшні</small>
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h4 class="text-primary">{report.get('win_rate', 0):.1f}%</h4>
-                        <small>Вінрейт</small>
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h4 class="text-info">${report.get('total_pnl', 0):.2f}</h4>
-                        <small>Загальний P&L</small>
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h4 class="text-warning">{report.get('profit_factor', 0):.2f}</h4>
-                        <small>Profit Factor</small>
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h4 class="text-secondary">{report.get('avg_duration_hours', 0):.1f}h</h4>
-                        <small>Серед. тривалість</small>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Таблиця сигналів -->
-            <div class="table-responsive">
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>Час</th>
-                            <th>Позиція</th>
-                            <th>Entry</th>
-                            <th>Stop Loss</th>
-                            <th>Take Profit</th>
-                            <th>Exit</th>
-                            <th>P&L ($)</th>
-                            <th>P&L (%)</th>
-                            <th>RR</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {table_rows}
-                    </tbody>
-                </table>
-            </div>
-            
-            <!-- Додаткова інформація -->
-            <div class="mt-3">
-                <small class="text-muted">
-                    <strong>Загальна статистика:</strong> 
-                    {report.get('total_trades', 0)} сигналів | 
-                    Вінрейт: {report.get('win_rate', 0):.1f}% | 
-                    Загальний P&L: ${report.get('total_pnl', 0):.2f} | 
-                    Profit Factor: {report.get('profit_factor', 0):.2f}
-                </small>
-            </div>
-            
-            <!-- Кнопка для відкриття детального модального вікна -->
-            <div class="text-center mt-3">
-                <button class="btn btn-primary" onclick="viewDetailedResults()">
-                    <i class="bi bi-arrow-up-right-circle"></i> Відкрити детальні результати
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Модальне вікно з детальними результатами -->
-    <div class="modal fade" id="detailedResultsModal" tabindex="-1" aria-labelledby="detailedResultsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="detailedResultsModalLabel">
-                        <i class="bi bi-graph-up"></i> Детальні результати бектесту
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <!-- Загальна статистика -->
-                    <div class="row mb-4">
-                        <div class="col-md-2">
-                            <div class="text-center p-3 bg-light rounded">
-                                <h4 class="text-success mb-1">{report.get('winning_trades', 0)}</h4>
-                                <small class="text-muted">Виграшні</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center p-3 bg-light rounded">
-                                <h4 class="text-danger mb-1">{report.get('losing_trades', 0)}</h4>
-                                <small class="text-muted">Програшні</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center p-3 bg-light rounded">
-                                <h4 class="text-primary mb-1">{report.get('win_rate', 0):.1f}%</h4>
-                                <small class="text-muted">Вінрейт</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center p-3 bg-light rounded">
-                                <h4 class="text-info mb-1">${report.get('total_pnl', 0):.2f}</h4>
-                                <small class="text-muted">Загальний P&L</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center p-3 bg-light rounded">
-                                <h4 class="text-warning mb-1">{report.get('profit_factor', 0):.2f}</h4>
-                                <small class="text-muted">Profit Factor</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center p-3 bg-light rounded">
-                                <h4 class="text-secondary mb-1">{report.get('avg_duration_hours', 0):.1f}h</h4>
-                                <small class="text-muted">Серед. тривалість</small>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Таблиця сигналів -->
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>Час</th>
-                                    <th>Позиція</th>
-                                    <th>Entry</th>
-                                    <th>Stop Loss</th>
-                                    <th>Take Profit</th>
-                                    <th>Exit</th>
-                                    <th>P&L ($)</th>
-                                    <th>P&L (%)</th>
-                                    <th>RR</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {table_rows}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрити</button>
-                    <button type="button" class="btn btn-primary" onclick="exportToCSV()">
-                        <i class="bi bi-download"></i> Експорт в CSV
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-    function viewDetailedResults() {{
-        const modal = new bootstrap.Modal(document.getElementById('detailedResultsModal'));
-        modal.show();
-    }}
-    
-    function exportToCSV() {{
-        // Тут можна додати логіку експорту в CSV
-        alert('Функція експорту буде додана пізніше');
-    }}
-    </script>
-    """
-    return html
+# Функція render_backtest_results_html видалена - тепер використовуються Jinja2 шаблони
 
 
-@app.get("/api/backtests/csv/detailed/{symbol}")
-async def get_csv_detailed_results(symbol: str, request: Request):
-    """Get detailed CSV backtest results with full table"""
-    try:
-        symbol = symbol.upper()
-        results_file = Path("backtest_results") / symbol / "latest_results.json"
-        
-        if not results_file.exists():
-            raise HTTPException(status_code=404, detail=f"Results for {symbol} not found")
-        
-        # Read and parse results
-        with open(results_file, 'r', encoding='utf-8') as f:
-            import json
-            data = json.load(f)
-        
-        # Check if this is a CSV backtest result
-        if data.get('type') != 'csv_backtest':
-            raise HTTPException(status_code=400, detail=f"Not a CSV backtest result for {symbol}")
-        
-        # Find the latest CSV file
-        symbol_dir = Path("backtest_results") / symbol
-        csv_files = list(symbol_dir.glob("csv_backtest_*.csv"))
-        
-        if not csv_files:
-            raise HTTPException(status_code=404, detail=f"CSV file not found for {symbol}")
-        
-        # Get the most recent CSV file
-        latest_csv = max(csv_files, key=lambda x: x.stat().st_mtime)
-        
-        # Load CSV data
-        import pandas as pd
-        signals_df = pd.read_csv(latest_csv)
-        
-        # Generate table rows
-        table_rows = ""
-        for _, signal in signals_df.iterrows():
-            # Format timestamp
-            timestamp = signal.get('timestamp', 'N/A')
-            if pd.notna(timestamp) and hasattr(timestamp, 'strftime'):
-                timestamp = timestamp.strftime("%Y-%m-%d %H:%M")
-            
-            # Format prices
-            entry_price = f"${signal.get('entry', 0):,.2f}" if pd.notna(signal.get('entry')) else "$0.00"
-            sl_price = f"${signal.get('sl', 0):,.2f}" if pd.notna(signal.get('sl')) else "$0.00"
-            tp_price = f"${signal.get('tp', 0):,.2f}" if pd.notna(signal.get('tp')) else "$0.00"
-            rr_value = f"{signal.get('rr', 0):.2f}" if pd.notna(signal.get('rr')) else "0.00"
-            
-            table_rows += f"""
-            <tr>
-                <td>{timestamp}</td>
-                <td><span class="badge bg-primary">{signal.get('direction', 'N/A')}</span></td>
-                <td>{entry_price}</td>
-                <td>{sl_price}</td>
-                <td>{tp_price}</td>
-                <td><span class="badge bg-secondary">Manual</span></td>
-                <td class="text-muted">-</td>
-                <td class="text-muted">-</td>
-                <td>{rr_value}</td>
-            </tr>
-            """
-        
-        # Get summary data
-        total_signals = data.get('total_signals', 0)
-        long_signals = data.get('long_signals', 0)
-        short_signals = data.get('short_signals', 0)
-        average_rr = data.get('average_rr', 0)
-        fvg_confluence = data.get('fvg_confluence_signals', 0)
-        timestamp = data.get('timestamp', 'N/A')
-        parameters = data.get('parameters', {})
-        
-        return HTMLResponse(f"""
-            <div class="modal fade" id="csvDetailedModal" tabindex="-1" aria-labelledby="csvDetailedModalLabel" aria-hidden="true">
-                <div class="modal-dialog modal-xl">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title" id="csvDetailedModalLabel">
-                                <i class="bi bi-graph-up"></i> Детальні результати CSV бектесту: {symbol}
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <!-- Загальна статистика -->
-                            <div class="row mb-4">
-                                <div class="col-md-2">
-                                    <div class="text-center p-3 bg-light rounded">
-                                        <h4 class="text-primary mb-1">{total_signals}</h4>
-                                        <small class="text-muted">Всього сигналів</small>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="text-center p-3 bg-light rounded">
-                                        <h4 class="text-success mb-1">{long_signals}</h4>
-                                        <small class="text-muted">Long сигналів</small>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="text-center p-3 bg-light rounded">
-                                        <h4 class="text-danger mb-1">{short_signals}</h4>
-                                        <small class="text-muted">Short сигналів</small>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="text-center p-3 bg-light rounded">
-                                        <h4 class="text-info mb-1">{average_rr:.2f}</h4>
-                                        <small class="text-muted">Середній R/R</small>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="text-center p-3 bg-light rounded">
-                                        <h4 class="text-warning mb-1">{fvg_confluence}</h4>
-                                        <small class="text-muted">FVG конвергенція</small>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="text-center p-3 bg-light rounded">
-                                        <h4 class="text-secondary mb-1">{timestamp}</h4>
-                                        <small class="text-muted">Оновлено</small>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Параметри бектесту -->
-                            <div class="row mb-4">
-                                <div class="col-12">
-                                    <div class="card">
-                                        <div class="card-header">
-                                            <h6 class="mb-0"><i class="bi bi-gear"></i> Параметри бектесту</h6>
-                                        </div>
-                                        <div class="card-body">
-                                            <div class="row">
-                                                <div class="col-md-3">
-                                                    <strong>LTF файл:</strong><br>
-                                                    <small class="text-muted">{parameters.get('ltf_file', 'N/A')}</small>
-                                                </div>
-                                                <div class="col-md-3">
-                                                    <strong>HTF файл:</strong><br>
-                                                    <small class="text-muted">{parameters.get('htf_file', 'N/A')}</small>
-                                                </div>
-                                                <div class="col-md-3">
-                                                    <strong>Мін. R/R:</strong><br>
-                                                    <small class="text-muted">{parameters.get('rr_min', 'N/A')}</small>
-                                                </div>
-                                                <div class="col-md-3">
-                                                    <strong>Fractal:</strong><br>
-                                                    <small class="text-muted">{parameters.get('fractal_left', 'N/A')}/{parameters.get('fractal_right', 'N/A')}</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Таблиця сигналів -->
-                            <div class="table-responsive">
-                                <table class="table table-striped table-hover">
-                                    <thead class="table-dark">
-                                        <tr>
-                                            <th>Час</th>
-                                            <th>Позиція</th>
-                                            <th>Entry</th>
-                                            <th>Stop Loss</th>
-                                            <th>Take Profit</th>
-                                            <th>Exit</th>
-                                            <th>P&L ($)</th>
-                                            <th>P&L (%)</th>
-                                            <th>RR</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {table_rows}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрити</button>
-                            <button type="button" class="btn btn-primary" onclick="downloadCSVFile('{symbol}')">
-                                <i class="bi bi-download"></i> Завантажити CSV
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <script>
-            function downloadCSVFile(symbol) {{
-                // Завантажуємо CSV файл
-                const link = document.createElement('a');
-                link.href = `/api/backtests/csv/download/${{symbol}}`;
-                link.download = `${{symbol}}_backtest_results.csv`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            }}
-            </script>
-        """)
-        
-    except Exception as e:
-        logger.error(f"Error getting detailed CSV results for {symbol}: {e}")
-        return HTMLResponse(f"""
-            <div class="alert alert-danger alert-dismissible fade show">
-                <i class="bi bi-exclamation-triangle"></i>
-                <strong>Error!</strong> Failed to load detailed results for {symbol}: {str(e)}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        """)
+# Цей endpoint більше не потрібен - видалено
 
 
 @app.get("/api/backtests/csv/download/{symbol}")

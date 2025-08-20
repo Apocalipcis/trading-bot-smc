@@ -3,12 +3,106 @@ Signal generation logic for SMC trading bot
 """
 import pandas as pd
 import numpy as np
-from typing import List
+from typing import List, Dict, Tuple
 from .models import Signal
 from .smc_detector import (
     fractal_pivots, detect_bos_choch, detect_fvg, 
     detect_ob, premium_discount
 )
+
+def calculate_exit_conditions(df: pd.DataFrame, entry_idx: int, entry_price: float, 
+                            sl: float, tp: float, direction: str) -> Dict:
+    """
+    Calculate exit conditions and timing for a trading signal
+    
+    Args:
+        df: Price dataframe
+        entry_idx: Index of entry candle
+        entry_price: Entry price
+        sl: Stop loss price
+        tp: Take profit price
+        direction: 'LONG' or 'SHORT'
+        
+    Returns:
+        Dictionary with exit information
+    """
+    # Look forward from entry to find exit
+    post_entry_data = df.iloc[entry_idx + 1:]
+    
+    if post_entry_data.empty:
+        return {
+            'exit_time': df.iloc[entry_idx]['timestamp'],
+            'exit_price': entry_price,
+            'exit_reason': 'NO_EXIT',
+            'pnl': 0.0,
+            'pnl_percent': 0.0,
+            'duration_minutes': 0
+        }
+    
+    exit_idx = None
+    exit_price = entry_price
+    exit_reason = 'NO_EXIT'
+    
+    for idx, candle in post_entry_data.iterrows():
+        high = candle['high']
+        low = candle['low']
+        
+        if direction == 'LONG':
+            # Check for TP hit
+            if high >= tp:
+                exit_idx = idx
+                exit_price = tp
+                exit_reason = 'TP'
+                break
+            # Check for SL hit
+            elif low <= sl:
+                exit_idx = idx
+                exit_price = sl
+                exit_reason = 'SL'
+                break
+        else:  # SHORT
+            # Check for TP hit
+            if low <= tp:
+                exit_idx = idx
+                exit_price = tp
+                exit_reason = 'TP'
+                break
+            # Check for SL hit
+            elif high >= sl:
+                exit_idx = idx
+                exit_price = sl
+                exit_reason = 'SL'
+                break
+    
+    # Calculate P&L
+    if direction == 'LONG':
+        pnl = exit_price - entry_price
+    else:
+        pnl = entry_price - exit_price
+    
+    pnl_percent = (pnl / entry_price) * 100
+    
+    # Calculate duration
+    if exit_idx is not None:
+        entry_time = pd.to_datetime(df.iloc[entry_idx]['timestamp'])
+        exit_time = pd.to_datetime(df.iloc[exit_idx]['timestamp'])
+        duration_minutes = int((exit_time - entry_time).total_seconds() / 60)
+        exit_time_str = str(exit_time)
+    else:
+        # Use last available candle time
+        last_time = pd.to_datetime(df.iloc[-1]['timestamp'])
+        entry_time = pd.to_datetime(df.iloc[entry_idx]['timestamp'])
+        duration_minutes = int((last_time - entry_time).total_seconds() / 60)
+        exit_time_str = str(last_time)
+    
+    return {
+        'exit_time': exit_time_str,
+        'exit_price': float(exit_price),
+        'exit_reason': exit_reason,
+        'pnl': float(pnl),
+        'pnl_percent': float(pnl_percent),
+        'duration_minutes': duration_minutes
+    }
 
 def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame, 
                     left: int = 2, right: int = 2, rr_min: float = 3.0) -> pd.DataFrame:
@@ -23,7 +117,7 @@ def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame,
         rr_min: Minimum risk/reward ratio
         
     Returns:
-        DataFrame with trading signals
+        DataFrame with trading signals including exit conditions and P&L
     """
     
     # Step 1: Determine HTF bias from last BOS
@@ -145,7 +239,12 @@ def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame,
         if actual_rr < rr_min:
             continue
         
-        # Step 10: Create signal
+        # Step 10: Calculate exit conditions and P&L
+        exit_info = calculate_exit_conditions(
+            df_ltf, actual_touch_idx, entry, sl, tp, direction
+        )
+        
+        # Step 11: Create signal with extended information
         signal = {
             'timestamp': df_ltf['timestamp'].iloc[actual_touch_idx],
             'direction': direction,
@@ -156,9 +255,23 @@ def generate_signals(df_ltf: pd.DataFrame, df_htf: pd.DataFrame,
             'htf_bias': bias,
             'ob_idx': ob.start_idx,
             'bos_idx': ob.bos_idx,
-            'fvg_confluence': fvg_confluence
+            'fvg_confluence': fvg_confluence,
+            # New fields
+            'exit_time': exit_info['exit_time'],
+            'exit_price': exit_info['exit_price'],
+            'exit_reason': exit_info['exit_reason'],
+            'pnl': exit_info['pnl'],
+            'pnl_percent': exit_info['pnl_percent'],
+            'duration_minutes': exit_info['duration_minutes']
         }
         
         signals.append(signal)
     
-    return pd.DataFrame(signals)
+    # Convert to DataFrame and sort by timestamp (entry time)
+    signals_df = pd.DataFrame(signals)
+    if not signals_df.empty:
+        signals_df['timestamp'] = pd.to_datetime(signals_df['timestamp'])
+        signals_df = signals_df.sort_values('timestamp', ascending=False)
+        signals_df['timestamp'] = signals_df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    return signals_df

@@ -1,0 +1,453 @@
+<!-- Модальне вікно з результатами бектесту -->
+<div class="modal fade" id="resultsModal" tabindex="-1">
+    <div class="modal-dialog {% if backtest_type == 'csv_backtest' %}modal-xl{% else %}modal-lg{% endif %}">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    {% if backtest_type == 'csv_backtest' %}
+                        <i class="bi bi-graph-up"></i> Детальні результати CSV бектесту: {{ symbol }}
+                    {% else %}
+                        <i class="bi bi-graph-up"></i> Результати бектесту: {{ symbol }}
+                    {% endif %}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+                {% if backtest_type == 'csv_backtest' %}
+                    <!-- CSV Backtest Results - Detailed View -->
+                    
+                    <!-- Загальна статистика -->
+                    <div class="row mb-4">
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-primary mb-1">{{ results.total_signals }}</h4>
+                                <small class="text-muted">Всього сигналів</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-success mb-1">{{ results.long_signals }}</h4>
+                                <small class="text-muted">Long сигналів</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-danger mb-1">{{ results.short_signals }}</h4>
+                                <small class="text-muted">Short сигналів</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-info mb-1">{{ "%.2f"|format(results.average_rr) }}</h4>
+                                <small class="text-muted">Середній R/R</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-warning mb-1">{{ results.fvg_confluence }}</h4>
+                                <small class="text-muted">FVG конвергенція</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-secondary mb-1">{{ results.timestamp }}</h4>
+                                <small class="text-muted">Оновлено</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- P&L статистика -->
+                    <div class="row mb-4">
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="{% if (results.total_pnl|default(0)) > 0 %}text-success{% elif (results.total_pnl|default(0)) < 0 %}text-danger{% else %}text-secondary{% endif %} mb-1">
+                                    ${{ "%.2f"|format(results.total_pnl|default(0)) }}
+                                </h4>
+                                <small class="text-muted">Загальний P&L</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-success mb-1">{{ results.winning_trades|default(0) }}</h4>
+                                <small class="text-muted">Прибуткових</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-danger mb-1">{{ results.losing_trades|default(0) }}</h4>
+                                <small class="text-muted">Збиткових</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-info mb-1">{{ "%.1f"|format(results.win_rate|default(0)) }}%</h4>
+                                <small class="text-muted">Win Rate</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-warning mb-1">{{ "%.1f"|format(results.avg_duration_hours|default(0)) }}г</h4>
+                                <small class="text-muted">Середня тривалість</small>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-secondary mb-1">{{ results.fvg_confluence }}</h4>
+                                <small class="text-muted">FVG конвергенція</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Параметри бектесту -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="bi bi-gear"></i> Параметри бектесту</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-3">
+                                            <strong>LTF файл:</strong><br>
+                                            <small class="text-muted">{{ parameters.ltf_file|default('N/A') }}</small>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <strong>HTF файл:</strong><br>
+                                            <small class="text-muted">{{ parameters.htf_file|default('N/A') }}</small>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <strong>Мін. R/R:</strong><br>
+                                            <small class="text-muted">{{ parameters.rr_min|default('N/A') }}</small>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <strong>Fractal:</strong><br>
+                                            <small class="text-muted">{{ parameters.fractal_left|default('N/A') }}/{{ parameters.fractal_right|default('N/A') }}</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Контроли сортування -->
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="bi bi-sort-down"></i> Сортування</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="btn-group" role="group">
+                                        <button type="button" class="btn btn-outline-primary" onclick="window.sortTable('timestamp', 'desc'); console.log('Sorting by timestamp desc');">
+                                            <i class="bi bi-clock"></i> Час входу (новіші)
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="window.sortTable('timestamp', 'asc'); console.log('Sorting by timestamp asc');">
+                                            <i class="bi bi-clock-history"></i> Час входу (старіші)
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="window.sortTable('exit_time', 'desc'); console.log('Sorting by exit_time desc');">
+                                            <i class="bi bi-calendar-check"></i> Час закриття
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="window.sortTable('pnl', 'desc'); console.log('Sorting by pnl desc');">
+                                            <i class="bi bi-graph-up-arrow"></i> P&L (високий)
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="window.sortTable('duration_minutes', 'desc'); console.log('Sorting by duration desc');">
+                                            <i class="bi bi-hourglass-split"></i> Тривалість
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Таблиця сигналів -->
+                    {% if signals %}
+                    <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+                        <table class="table table-striped table-hover table-sm" id="signalsTable">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th data-sort="timestamp">Час входу <i class="bi bi-sort-down"></i></th>
+                                    <th data-sort="direction">Позиція <i class="bi bi-sort"></i></th>
+                                    <th data-sort="entry">Entry <i class="bi bi-sort"></i></th>
+                                    <th data-sort="sl">Stop Loss <i class="bi bi-sort"></i></th>
+                                    <th data-sort="tp">Take Profit <i class="bi bi-sort"></i></th>
+                                    <th data-sort="exit_time">Час закриття <i class="bi bi-sort"></i></th>
+                                    <th data-sort="exit_reason">Причина <i class="bi bi-sort"></i></th>
+                                    <th data-sort="pnl">P&L ($) <i class="bi bi-sort"></i></th>
+                                    <th data-sort="pnl_percent">P&L (%) <i class="bi bi-sort"></i></th>
+                                    <th data-sort="duration_minutes">Тривалість <i class="bi bi-sort"></i></th>
+                                    <th data-sort="rr">RR <i class="bi bi-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for signal in signals %}
+                                <tr>
+                                    <td>{{ signal.timestamp|default('N/A') }}</td>
+                                    <td>
+                                        <span class="badge {% if signal.direction|default('') == 'LONG' %}bg-success{% else %}bg-danger{% endif %}">
+                                            {{ signal.direction|default('N/A') }}
+                                        </span>
+                                    </td>
+                                    <td>${{ "%.2f"|format(signal.entry|default(0)) }}</td>
+                                    <td>${{ "%.2f"|format(signal.sl|default(0)) }}</td>
+                                    <td>${{ "%.2f"|format(signal.tp|default(0)) }}</td>
+                                    <td>{{ signal.exit_time|default('N/A') }}</td>
+                                    <td>
+                                        {% if signal.exit_reason|default('') == 'TP' %}
+                                            <span class="badge bg-success">TP</span>
+                                        {% elif signal.exit_reason|default('') == 'SL' %}
+                                            <span class="badge bg-danger">SL</span>
+                                        {% elif signal.exit_reason|default('') == 'NO_EXIT' %}
+                                            <span class="badge bg-warning">Відкрита</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ signal.exit_reason|default('N/A') }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="{% if (signal.pnl|default(0)) > 0 %}text-success{% elif (signal.pnl|default(0)) < 0 %}text-danger{% endif %}">
+                                        ${{ "%.2f"|format(signal.pnl|default(0)) }}
+                                    </td>
+                                    <td class="{% if (signal.pnl_percent|default(0)) > 0 %}text-success{% elif (signal.pnl_percent|default(0)) < 0 %}text-danger{% endif %}">
+                                        {{ "%.2f"|format(signal.pnl_percent|default(0)) }}%
+                                    </td>
+                                    <td>
+                                        {% if signal.duration_minutes|default(0) > 0 %}
+                                            {% set hours = (signal.duration_minutes|default(0) // 60) %}
+                                            {% set minutes = (signal.duration_minutes|default(0) % 60) %}
+                                            {% if hours > 0 %}{{ hours }}г {{ minutes }}хв{% else %}{{ minutes }}хв{% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ "%.2f"|format(signal.rr|default(0)) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Увага!</strong> Дані сигналів не знайдено або не вдалося завантажити.
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <!-- Regular Backtest Results -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Performance Metrics</h6>
+                            <ul class="list-unstyled">
+                                <li><strong>Total Trades:</strong> {{ results.total_trades }}</li>
+                                <li><strong>Win Rate:</strong> {{ "%.1f"|format(results.win_rate) }}%</li>
+                                <li><strong>Profit Factor:</strong> {{ "%.2f"|format(results.profit_factor) }}</li>
+                                <li><strong>Total P&L:</strong> ${{ "%.2f"|format(results.total_pnl) }}</li>
+                                <li><strong>Max Drawdown:</strong> {{ "%.2f"|format(results.max_drawdown) }}%</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Risk Analysis</h6>
+                            <ul class="list-unstyled">
+                                <li><strong>Risk Level:</strong> {{ results.risk_level|default('N/A') }}</li>
+                                <li><strong>Recommendation:</strong> {{ results.recommendation|default('N/A') }}</li>
+                                <li><strong>Last Updated:</strong> {{ results.timestamp|default('N/A') }}</li>
+                            </ul>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрити</button>
+                {% if backtest_type == 'csv_backtest' %}
+                    <button type="button" class="btn btn-primary" onclick="downloadCSVFile('{{ symbol }}')">
+                        <i class="bi bi-download"></i> Завантажити CSV
+                    </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Робимо функції глобальними
+window.downloadCSVFile = function(symbol) {
+    console.log(`Downloading CSV for ${symbol}`);
+    // Завантажуємо CSV файл
+    const link = document.createElement('a');
+    link.href = `/api/backtests/csv/download/${symbol}`;
+    link.download = `${symbol}_backtest_results.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+window.sortTable = function(column, direction) {
+    console.log(`=== Starting sortTable function ===`);
+    console.log(`Column: ${column}, Direction: ${direction}`);
+    
+    const table = document.getElementById('signalsTable');
+    if (!table) {
+        console.error('Signals table not found! Checking for other table IDs...');
+        const allTables = document.querySelectorAll('table');
+        console.log(`Found ${allTables.length} tables:`, allTables);
+        return;
+    }
+    
+    console.log('Table found:', table);
+    
+    const tbody = table.querySelector('tbody');
+    if (!tbody) {
+        console.error('Table body not found!');
+        console.log('Table structure:', table.innerHTML.substring(0, 200));
+        return;
+    }
+    
+    console.log('Table body found:', tbody);
+    
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    if (rows.length === 0) {
+        console.warn('No rows to sort');
+        console.log('Table body content:', tbody.innerHTML.substring(0, 200));
+        return;
+    }
+    
+    console.log(`Found ${rows.length} rows to sort`);
+    
+    // Оновлюємо іконки сортування
+    const headers = table.querySelectorAll('th[data-sort]');
+    headers.forEach(header => {
+        const icon = header.querySelector('i');
+        if (icon) {
+            icon.className = 'bi bi-sort';
+        }
+    });
+    
+    const currentHeader = table.querySelector(`th[data-sort="${column}"]`);
+    if (currentHeader) {
+        const icon = currentHeader.querySelector('i');
+        if (icon) {
+            icon.className = direction === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+        }
+    }
+    
+    // Сортуємо рядки
+    rows.sort((a, b) => {
+        const aCell = a.querySelector(`td:nth-child(${window.getColumnIndex(column)})`);
+        const bCell = b.querySelector(`td:nth-child(${window.getColumnIndex(column)})`);
+        
+        if (!aCell || !bCell) return 0;
+        
+        let aValue = aCell.textContent.trim();
+        let bValue = bCell.textContent.trim();
+        
+        // Спеціальна обробка для різних типів даних
+        if (column === 'timestamp' || column === 'exit_time') {
+            // Сортування за часом
+            if (aValue === 'N/A') aValue = new Date(0);
+            else if (bValue === 'N/A') bValue = new Date(0);
+            else {
+                aValue = new Date(aValue);
+                bValue = new Date(bValue);
+            }
+        } else if (column === 'pnl' || column === 'pnl_percent' || column === 'duration_minutes' || column === 'rr') {
+            // Сортування за числами
+            aValue = parseFloat(aValue.replace(/[^\d.-]/g, '')) || 0;
+            bValue = parseFloat(bValue.replace(/[^\d.-]/g, '')) || 0;
+        } else if (column === 'direction') {
+            // Сортування за напрямком (LONG перед SHORT)
+            aValue = aValue === 'LONG' ? 1 : 0;
+            bValue = bValue === 'LONG' ? 1 : 0;
+        } else if (column === 'exit_reason') {
+            // Сортування за причиною закриття
+            const reasonOrder = { 'TP': 1, 'SL': 2, 'NO_EXIT': 3 };
+            aValue = reasonOrder[aValue] || 4;
+            bValue = reasonOrder[bValue] || 4;
+        }
+        
+        // Перевіряємо чи значення є числами для порівняння
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+            if (direction === 'asc') {
+                return aValue - bValue;
+            } else {
+                return bValue - aValue;
+            }
+        } else if (aValue instanceof Date && bValue instanceof Date) {
+            if (direction === 'asc') {
+                return aValue - bValue;
+            } else {
+                return bValue - aValue;
+            }
+        } else {
+            // Для рядків
+            if (direction === 'asc') {
+                return aValue > bValue ? 1 : -1;
+            } else {
+                return aValue < bValue ? 1 : -1;
+            }
+        }
+    });
+    
+    // Очищаємо та додаємо відсортовані рядки
+    tbody.innerHTML = '';
+    rows.forEach(row => tbody.appendChild(row));
+    
+    console.log(`Table sorted successfully. Rows: ${rows.length}`);
+}
+
+window.getColumnIndex = function(column) {
+    const columnMap = {
+        'timestamp': 1,
+        'direction': 2,
+        'entry': 3,
+        'sl': 4,
+        'tp': 5,
+        'exit_time': 6,
+        'exit_reason': 7,
+        'pnl': 8,
+        'pnl_percent': 9,
+        'duration_minutes': 10,
+        'rr': 11
+    };
+    const index = columnMap[column];
+    if (index === undefined) {
+        console.warn(`Unknown column: ${column}`);
+        return 1;
+    }
+    return index;
+}
+
+// Додаємо функцію для перевірки готовності таблиці
+window.isTableReady = function() {
+    const table = document.getElementById('signalsTable');
+    const tbody = table?.querySelector('tbody');
+    const rows = tbody?.querySelectorAll('tr');
+    return table && tbody && rows && rows.length > 0;
+}
+
+// Ініціалізація сортування за часом входу (за замовчуванням)
+// Використовуємо більш надійний підхід для ініціалізації
+window.initializeSorting = function() {
+    if (window.isTableReady()) {
+        console.log('Initializing sorting for signals table');
+        window.sortTable('timestamp', 'desc');
+    } else {
+        console.log('Table not ready, retrying in 100ms...');
+        setTimeout(window.initializeSorting, 100);
+    }
+}
+
+// Запускаємо ініціалізацію після завантаження модального вікна
+setTimeout(window.initializeSorting, 100);
+
+// Додаємо обробник для кліків по заголовках таблиці
+document.addEventListener('DOMContentLoaded', function() {
+    // Використовуємо делегування подій для заголовків таблиці
+    document.addEventListener('click', function(e) {
+        if (e.target.matches('th[data-sort]')) {
+            const column = e.target.getAttribute('data-sort');
+            const currentDirection = e.target.getAttribute('data-direction') || 'desc';
+            const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+            
+            e.target.setAttribute('data-direction', newDirection);
+            window.sortTable(column, newDirection);
+        }
+    });
+});
+</script>
