@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from pathlib import Path
 import sys
+import time
 
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -24,7 +25,7 @@ sys.path.append(str(project_root))
 from config import load_config, save_config, AppConfig, PairConfig, PairStatus
 from src.core import LiveExchangeGateway, PairManager
 from src.pre_trade_backtest import run_symbol_backtest
-from src.data_downloader import download_crypto_data
+from src.data_downloader import download_crypto_data, download_specific_timeframe
 from src.telegram_client import TelegramClient
 from src.data_loader import prepare_data, validate_timeframe_alignment
 from src.signal_generator import generate_signals
@@ -90,6 +91,35 @@ app = FastAPI(
     description="Pair management dashboard with toggles",
     version="2.0.0"
 )
+
+# Add middleware for request logging and debugging
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests for debugging"""
+    start_time = time.time()
+    
+    # Log request details
+    logger.info(f"Request: {request.method} {request.url.path}")
+    logger.info(f"Headers: {dict(request.headers)}")
+    logger.info(f"Query params: {dict(request.query_params)}")
+    
+    # For POST requests, log form data if available
+    if request.method == "POST":
+        try:
+            body = await request.body()
+            if body:
+                logger.info(f"POST body: {body.decode()}")
+        except Exception as e:
+            logger.warning(f"Could not read POST body: {e}")
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Log response details
+    process_time = time.time() - start_time
+    logger.info(f"Response: {response.status_code} in {process_time:.3f}s")
+    
+    return response
 
 # Templates and static files
 # Get proper paths relative to project root
@@ -468,7 +498,7 @@ async def remove_pair(symbol: str):
 
 @app.post("/api/pairs/{symbol}/run-backtest")
 async def run_pair_backtest(symbol: str):
-    """Run backtest for the specified pair"""
+    """Run backtest for the specified pair with default parameters"""
     try:
         symbol = symbol.upper()
         
@@ -487,50 +517,64 @@ async def run_pair_backtest(symbol: str):
                 </div>
             """)
         
-        # Import backtest function
-        from src.pre_trade_backtest import run_symbol_backtest
+        # Use pair config defaults
+        rr_min = getattr(pair_config, 'min_risk_reward', 3.0)
+        fractal_left = getattr(pair_config, 'fractal_left', 2)
+        fractal_right = getattr(pair_config, 'fractal_right', 2)
+        ltf_timeframe = getattr(pair_config, 'timeframe', '15m')
+        htf_timeframe = '4h'
+        days_back = 30
         
-        # Build config dict for backtest
-        config_dict = {
-            'min_risk_reward': pair_config.min_risk_reward,
-            'fractal_left': pair_config.fractal_left,
-            'fractal_right': pair_config.fractal_right,
-            'backtest_days': 30,
-            'ltf_timeframe': getattr(pair_config, 'timeframe', '15m'),
-            'htf_timeframe': '4h'
-        }
+        # Mark as running in UI
+        status = bot_state.pair_statuses.get(symbol)
+        if status:
+            status.backtest_running = True
         
-        # Run backtest in background thread and reflect running status in UI
-        import asyncio
+        # Run backtest in background
         async def _run_and_flag():
             try:
-                # Mark as running in UI if we have a status entry
-                status = bot_state.pair_statuses.get(symbol)
-                if status:
-                    status.backtest_running = True
-                await asyncio.to_thread(run_symbol_backtest, symbol, config_dict)
+                result = await perform_csv_backtest(
+                    symbol=symbol,
+                    ltf_timeframe=ltf_timeframe,
+                    htf_timeframe=htf_timeframe,
+                    days_back=days_back,
+                    rr_min=rr_min,
+                    fractal_left=fractal_left,
+                    fractal_right=fractal_right,
+                    require_fvg=False
+                )
+                
+                if result['success']:
+                    logger.info(f"Backtest completed for {symbol}: {result['report']['total_trades']} trades")
+                else:
+                    logger.error(f"Backtest failed for {symbol}: {result['error']}")
+                    
             finally:
+                # Mark as not running
                 status = bot_state.pair_statuses.get(symbol)
                 if status:
                     status.backtest_running = False
         
         asyncio.create_task(_run_and_flag())
         
-        logger.info(f"Started backtest for {symbol}")
+        logger.info(f"Started backtest for {symbol} with defaults: {ltf_timeframe}/{htf_timeframe}, {days_back}d, RR={rr_min}")
         
         # Return success message
         return HTMLResponse(f"""
             <div class="alert alert-success alert-dismissible fade show" role="alert">
                 <i class="bi bi-check-circle"></i>
-                <strong>Success!</strong> Started backtest for {symbol}
+                <strong>Success!</strong> Started backtest for {symbol} with default parameters
+                <br><small class="text-muted">
+                    {ltf_timeframe}/{htf_timeframe} • {days_back} days • RR≥{rr_min} • 
+                    Fractal({fractal_left},{fractal_right})
+                </small>
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewBacktestResults('{symbol}')">
+                        <i class="bi bi-eye"></i> View Results
+                    </button>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
-            <script>
-                // Trigger pairs table refresh after a short delay
-                setTimeout(() => {{
-                    htmx.trigger('#pairs-table', 'load');
-                }}, 500);
-            </script>
         """)
         
     except Exception as e:
@@ -575,12 +619,6 @@ async def toggle_pair_backtest_status(symbol: str):
                 <strong>Success!</strong> {symbol} backtest {status_text}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
-            <script>
-                // Trigger pairs table refresh after a short delay
-                setTimeout(() => {{
-                    htmx.trigger('#pairs-table', 'load');
-                }}, 500);
-            </script>
         """)
         
     except Exception as e:
@@ -1608,6 +1646,577 @@ async def download_csv_file(symbol: str):
     except Exception as e:
         logger.error(f"Error downloading CSV for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/pairs/{symbol}/run-backtest-with-params")
+async def run_pair_backtest_with_params(
+    request: Request,
+    symbol: str,
+    ltf_timeframe: str = Form("15m"),
+    htf_timeframe: str = Form("4h"),
+    days_back: int = Form(30),
+    rr_min: float = Form(3.0),
+    fractal_left: int = Form(2),
+    fractal_right: int = Form(2),
+    require_fvg: bool = Form(False)
+):
+    """Run backtest for the specified pair with custom parameters"""
+    try:
+        symbol = symbol.upper()
+        
+        # Find pair in config
+        pair_config = bot_state.config.get_pair_config(symbol)
+        if not pair_config:
+            raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
+        
+        # Check if backtest is already running
+        if bot_state.pair_statuses.get(symbol) and bot_state.pair_statuses[symbol].backtest_running:
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning!</strong> Backtest for {symbol} is already running
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        
+        # Use pair config defaults if not provided
+        if rr_min == 3.0:
+            rr_min = getattr(pair_config, 'min_risk_reward', 3.0)
+        if fractal_left == 2:
+            fractal_left = getattr(pair_config, 'fractal_left', 2)
+        if fractal_right == 2:
+            fractal_right = getattr(pair_config, 'fractal_right', 2)
+        
+        # Mark as running in UI
+        status = bot_state.pair_statuses.get(symbol)
+        if status:
+            status.backtest_running = True
+        
+        # Run backtest in background
+        async def _run_and_flag():
+            try:
+                result = await perform_csv_backtest(
+                    symbol=symbol,
+                    ltf_timeframe=ltf_timeframe,
+                    htf_timeframe=htf_timeframe,
+                    days_back=days_back,
+                    rr_min=rr_min,
+                    fractal_left=fractal_left,
+                    fractal_right=fractal_right,
+                    require_fvg=require_fvg
+                )
+                
+                if result['success']:
+                    logger.info(f"Backtest completed for {symbol}: {result['report']['total_trades']} trades")
+                else:
+                    logger.error(f"Backtest failed for {symbol}: {result['error']}")
+                    
+            finally:
+                # Mark as not running
+                status = bot_state.pair_statuses.get(symbol)
+                if status:
+                    status.backtest_running = False
+        
+        asyncio.create_task(_run_and_flag())
+        
+        logger.info(f"Started backtest for {symbol} with params: {ltf_timeframe}/{htf_timeframe}, {days_back}d, RR={rr_min}")
+        
+        # Return success message
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Success!</strong> Started backtest for {symbol}
+                <br><small class="text-muted">
+                    {ltf_timeframe}/{htf_timeframe} • {days_back} days • RR≥{rr_min} • 
+                    Fractal({fractal_left},{fractal_right}) • FVG: {'Yes' if require_fvg else 'No'}
+                </small>
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewBacktestResults('{symbol}')">
+                        <i class="bi bi-eye"></i> View Results
+                    </button>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Error starting backtest for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to start backtest for {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+async def perform_csv_backtest(
+    symbol: str,
+    ltf_timeframe: str = "15m",
+    htf_timeframe: str = "4h",
+    days_back: int = 30,
+    rr_min: float = 3.0,
+    fractal_left: int = 2,
+    fractal_right: int = 2,
+    require_fvg: bool = False
+) -> dict:
+    """
+    Perform CSV backtest for a specific symbol with downloaded data
+    
+    Args:
+        symbol: Trading pair symbol (e.g., 'BTCUSDT')
+        ltf_timeframe: Lower timeframe (default: '15m')
+        htf_timeframe: Higher timeframe (default: '4h')
+        days_back: Number of days to download (default: 30)
+        rr_min: Minimum risk/reward ratio
+        fractal_left: Number of candles left of fractal
+        fractal_right: Number of candles right of fractal
+        require_fvg: Whether to require FVG confluence
+        
+    Returns:
+        Dictionary with backtest results and file paths
+    """
+    try:
+        symbol = symbol.upper()
+        logger.info(f"Starting CSV backtest for {symbol}: {ltf_timeframe}/{htf_timeframe}, {days_back} days")
+        
+        # Download data for both timeframes
+        from datetime import datetime, timedelta
+        
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # Download LTF data
+        ltf_filename = await download_specific_timeframe(
+            symbol, ltf_timeframe, days_back, end_date
+        )
+        
+        # Download HTF data
+        htf_filename = await download_specific_timeframe(
+            symbol, htf_timeframe, days_back, end_date
+        )
+        
+        logger.info(f"Data downloaded: LTF={ltf_filename}, HTF={htf_filename}")
+        
+        # Validate files exist
+        data_dir = Path("data")
+        ltf_path = data_dir / ltf_filename
+        htf_path = data_dir / htf_filename
+        
+        if not ltf_path.exists():
+            raise FileNotFoundError(f"LTF file not found: {ltf_filename}")
+        if not htf_path.exists():
+            raise FileNotFoundError(f"HTF file not found: {htf_filename}")
+        
+        # Load data
+        df_ltf, df_htf = prepare_data(str(ltf_path), str(htf_path))
+        logger.info(f"Data loaded: LTF={len(df_ltf)} rows, HTF={len(df_htf)} rows")
+        
+        # Validate timeframe alignment
+        if not validate_timeframe_alignment(df_ltf, df_htf):
+            logger.warning("Timeframe alignment issues detected")
+        
+        # Generate signals
+        signals = generate_signals(
+            df_ltf=df_ltf,
+            df_htf=df_htf,
+            left=fractal_left,
+            right=fractal_right,
+            rr_min=rr_min
+        )
+        logger.info(f"Signals generated: {len(signals)} total")
+        
+        # Validate signals using BacktestValidator
+        if len(signals) > 0:
+            validator = BacktestValidator(df_ltf, position_size=100.0)
+            trade_results = validator.validate_all_signals(signals)
+            report = validator.generate_report(trade_results)
+            logger.info(f"Backtest validation completed: {len(trade_results)} trades validated")
+        else:
+            trade_results = []
+            report = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'total_pnl': 0,
+                'profit_factor': 0,
+                'avg_duration_hours': 0
+            }
+        
+        # Save results to CSV
+        symbol_dir = Path("backtest_results") / symbol
+        symbol_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = f"csv_backtest_{timestamp}.csv"
+        csv_path = symbol_dir / csv_filename
+        
+        # Convert trade results to DataFrame and save
+        if trade_results:
+            results_df = pd.DataFrame(trade_results)
+            results_df.to_csv(csv_path, index=False)
+            logger.info(f"Results saved to: {csv_path}")
+        else:
+            # Create empty CSV with headers
+            empty_df = pd.DataFrame(columns=[
+                'timestamp', 'direction', 'entry', 'sl', 'tp', 'exit_time', 
+                'exit_reason', 'pnl', 'pnl_percent', 'rr'
+            ])
+            empty_df.to_csv(csv_path, index=False)
+            logger.info(f"Empty results file created: {csv_path}")
+        
+        # Save latest results as JSON
+        latest_results = {
+            'symbol': symbol,
+            'timestamp': timestamp,
+            'ltf_timeframe': ltf_timeframe,
+            'htf_timeframe': htf_timeframe,
+            'days_back': days_back,
+            'parameters': {
+                'rr_min': rr_min,
+                'fractal_left': fractal_left,
+                'fractal_right': fractal_right,
+                'require_fvg': require_fvg
+            },
+            'report': report,
+            'csv_file': str(csv_path),
+            'ltf_file': ltf_filename,
+            'htf_file': htf_filename
+        }
+        
+        latest_json_path = symbol_dir / "latest_results.json"
+        import json
+        with open(latest_json_path, 'w') as f:
+            json.dump(latest_results, f, indent=2, default=str)
+        
+        logger.info(f"Latest results saved to: {latest_json_path}")
+        
+        return {
+            'success': True,
+            'symbol': symbol,
+            'report': report,
+            'trade_results': trade_results,
+            'csv_file': str(csv_path),
+            'ltf_file': ltf_filename,
+            'htf_file': htf_filename,
+            'parameters': latest_results['parameters']
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in perform_csv_backtest for {symbol}: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'symbol': symbol
+        }
+
+
+@app.post("/api/pairs/{symbol}/run-backtest-auto")
+async def run_auto_backtest(
+    request: Request,
+    symbol: str,
+    ltf_timeframe: str = Form("15m"),
+    htf_timeframe: str = Form("4h"),
+    days: int = Form(30),
+    rr_min: float = Form(3.0),
+    fractal_left: int = Form(2),
+    fractal_right: int = Form(2),
+    require_fvg: bool = Form(False)
+):
+    """Run automatic backtest: Fetch Data -> Run CSV Backtest"""
+    logger.info(f"=== AUTO BACKTEST ENDPOINT CALLED ===")
+    logger.info(f"Symbol: {symbol}")
+    logger.info(f"LTF Timeframe: {ltf_timeframe}")
+    logger.info(f"HTF Timeframe: {htf_timeframe}")
+    logger.info(f"Days: {days}")
+    logger.info(f"RR Min: {rr_min}")
+    logger.info(f"Fractal Left: {fractal_left}")
+    logger.info(f"Fractal Right: {fractal_right}")
+    logger.info(f"Require FVG: {require_fvg}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request URL: {request.url}")
+    
+    # Check content type
+    content_type = request.headers.get('content-type', '')
+    logger.info(f"Content-Type: {content_type}")
+    
+    if 'multipart/form-data' not in content_type and 'application/x-www-form-urlencoded' not in content_type:
+        logger.warning(f"Unexpected content type: {content_type}")
+        logger.warning("This endpoint expects form data")
+    
+    # Validate input parameters
+    try:
+        # Convert and validate days
+        if isinstance(days, str):
+            days = int(days)
+        if not isinstance(days, int) or days < 7 or days > 365:
+            raise ValueError(f"Invalid days value: {days}")
+        
+        # Convert and validate rr_min
+        if isinstance(rr_min, str):
+            rr_min = float(rr_min)
+        if not isinstance(rr_min, (int, float)) or rr_min < 1.0 or rr_min > 10.0:
+            raise ValueError(f"Invalid rr_min value: {rr_min}")
+        
+        # Convert and validate fractal values
+        if isinstance(fractal_left, str):
+            fractal_left = int(fractal_left)
+        if isinstance(fractal_right, str):
+            fractal_right = int(fractal_right)
+        
+        if not isinstance(fractal_left, int) or fractal_left < 1 or fractal_left > 10:
+            raise ValueError(f"Invalid fractal_left value: {fractal_left}")
+        if not isinstance(fractal_right, int) or fractal_right < 1 or fractal_right > 10:
+            raise ValueError(f"Invalid fractal_right value: {fractal_right}")
+        
+        # Validate timeframes
+        valid_ltf_timeframes = ["1m", "5m", "15m", "30m", "1h"]
+        valid_htf_timeframes = ["1h", "4h", "1d", "1w"]
+        
+        if ltf_timeframe not in valid_ltf_timeframes:
+            raise ValueError(f"Invalid LTF timeframe: {ltf_timeframe}")
+        if htf_timeframe not in valid_htf_timeframes:
+            raise ValueError(f"Invalid HTF timeframe: {htf_timeframe}")
+        
+        logger.info(f"Input validation passed")
+        
+    except ValueError as e:
+        logger.error(f"Input validation failed: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Validation Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """, status_code=400)
+    
+    try:
+        symbol = symbol.upper()
+        logger.info(f"Processing symbol: {symbol}")
+        
+        # Find pair in config
+        pair_config = bot_state.config.get_pair_config(symbol)
+        if not pair_config:
+            logger.error(f"Pair {symbol} not found in config")
+            raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
+        
+        logger.info(f"Found pair config: {pair_config}")
+        
+        # Check if backtest is already running
+        if bot_state.pair_statuses.get(symbol) and bot_state.pair_statuses[symbol].backtest_running:
+            logger.warning(f"Backtest already running for {symbol}")
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning!</strong> Backtest for {symbol} is already running
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        
+        logger.info(f"Starting auto backtest for {symbol}")
+        
+        # Use pair config defaults if not provided
+        if rr_min == 3.0:
+            rr_min = getattr(pair_config, 'min_risk_reward', 3.0)
+        if fractal_left == 2:
+            fractal_left = getattr(pair_config, 'fractal_left', 2)
+        if fractal_right == 2:
+            fractal_right = getattr(pair_config, 'fractal_right', 2)
+        if ltf_timeframe == "15m":
+            ltf_timeframe = getattr(pair_config, 'timeframe', '15m')
+        
+        logger.info(f"Final parameters - RR: {rr_min}, Fractal L: {fractal_left}, Fractal R: {fractal_right}, LTF: {ltf_timeframe}")
+        
+        # Mark as running in UI
+        status = bot_state.pair_statuses.get(symbol)
+        if status:
+            status.backtest_running = True
+            logger.info(f"Marked {symbol} as running in UI")
+        
+        # Run auto backtest in background
+        async def _run_auto_backtest():
+            try:
+                logger.info(f"Starting auto backtest for {symbol}: Fetch Data -> CSV Backtest")
+                
+                # Step 1: Fetch Data
+                logger.info(f"Step 1: Fetching {symbol} data for {ltf_timeframe}/{htf_timeframe} ({days} days)")
+                
+                from src.data_downloader import download_specific_timeframe
+                from datetime import datetime, timedelta
+                
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=days)
+                
+                # Download LTF data
+                try:
+                    ltf_filename = await download_specific_timeframe(symbol, ltf_timeframe, days, end_date)
+                    logger.info(f"Downloaded LTF data: {ltf_filename}")
+                except Exception as e:
+                    logger.error(f"Failed to download LTF data: {e}")
+                    raise Exception(f"Failed to download LTF data: {str(e)}")
+                
+                # Download HTF data
+                try:
+                    htf_filename = await download_specific_timeframe(symbol, htf_timeframe, days, end_date)
+                    logger.info(f"Downloaded HTF data: {htf_filename}")
+                except Exception as e:
+                    logger.error(f"Failed to download HTF data: {e}")
+                    raise Exception(f"Failed to download HTF data: {str(e)}")
+                
+                # Step 2: Run CSV Backtest
+                logger.info(f"Step 2: Running CSV backtest with downloaded data")
+                
+                # perform_csv_backtest is defined in this same file
+                
+                result = await perform_csv_backtest(
+                    symbol=symbol,
+                    ltf_timeframe=ltf_timeframe,
+                    htf_timeframe=htf_timeframe,
+                    days_back=days,
+                    rr_min=rr_min,
+                    fractal_left=fractal_left,
+                    fractal_right=fractal_right,
+                    require_fvg=require_fvg
+                )
+                
+                if result['success']:
+                    logger.info(f"Auto backtest completed for {symbol}: {result['report']['total_trades']} trades")
+                else:
+                    logger.error(f"Auto backtest failed for {symbol}: {result['error']}")
+                    
+            except Exception as e:
+                logger.error(f"Auto backtest error for {symbol}: {e}")
+                logger.error(f"Error type: {type(e)}")
+                logger.error(f"Error details: {str(e)}")
+                
+                # Mark as not running in UI
+                status = bot_state.pair_statuses.get(symbol)
+                if status:
+                    status.backtest_running = False
+                    logger.info(f"Marked {symbol} as not running in UI after error")
+                
+                return HTMLResponse(f"""
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Error!</strong> Auto backtest failed for {symbol}: {str(e)}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                """)
+        
+        asyncio.create_task(_run_auto_backtest())
+        
+        logger.info(f"Started auto backtest for {symbol}: {ltf_timeframe}/{htf_timeframe}, {days}d, RR={rr_min}")
+        
+        # Return immediate response
+        return HTMLResponse(f"""
+            <div class="alert alert-info alert-dismissible fade show" role="alert">
+                <i class="bi bi-info-circle"></i>
+                <strong>Started!</strong> Auto backtest for {symbol} is now running in background
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+    
+    except Exception as e:
+        logger.error(f"Error starting auto backtest for {symbol}: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Error!</strong> Failed to start auto backtest for {symbol}: {str(e)}
+                <button type="button" class="btn-close" data-dismiss="alert"></button>
+            </div>
+        """)
+
+
+# Alternative endpoint for debugging - accepts both Form and JSON
+@app.post("/api/pairs/{symbol}/run-backtest-auto-debug")
+async def run_auto_backtest_debug(
+    request: Request,
+    symbol: str
+):
+    """Debug endpoint for auto backtest - accepts any data format"""
+    logger.info(f"=== DEBUG AUTO BACKTEST ENDPOINT CALLED ===")
+    logger.info(f"Symbol: {symbol}")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request URL: {request.url}")
+    logger.info(f"Content-Type: {request.headers.get('content-type', 'Not specified')}")
+    
+    try:
+        # Try to read body as different formats
+        body = await request.body()
+        logger.info(f"Raw body: {body}")
+        
+        if body:
+            try:
+                # Try as JSON
+                json_data = await request.json()
+                logger.info(f"JSON data: {json_data}")
+            except:
+                logger.info("Not JSON data")
+                
+            try:
+                # Try as form data
+                form_data = await request.form()
+                logger.info(f"Form data: {dict(form_data)}")
+            except:
+                logger.info("Not form data")
+        
+        # Return debug info
+        return HTMLResponse(f"""
+            <div class="alert alert-info alert-dismissible fade show" role="alert">
+                <i class="bi bi-info-circle"></i>
+                <strong>Debug Info!</strong> Endpoint called successfully
+                <br><small>Symbol: {symbol}</small>
+                <br><small>Method: {request.method}</small>
+                <br><small>Content-Type: {request.headers.get('content-type', 'Not specified')}</small>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Debug endpoint error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Debug Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+
+
+# Test endpoint to verify FastAPI is working
+@app.post("/api/test")
+async def test_endpoint(request: Request):
+    """Test endpoint to verify FastAPI is working"""
+    logger.info(f"=== TEST ENDPOINT CALLED ===")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request URL: {request.url}")
+    logger.info(f"Headers: {dict(request.headers)}")
+    
+    try:
+        body = await request.body()
+        logger.info(f"Body: {body}")
+        
+        return HTMLResponse(f"""
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle"></i>
+                <strong>Test Success!</strong> FastAPI is working correctly
+                <br><small>Method: {request.method}</small>
+                <br><small>URL: {request.url}</small>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
+        
+    except Exception as e:
+        logger.error(f"Test endpoint error: {e}")
+        return HTMLResponse(f"""
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Test Error!</strong> {str(e)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        """)
 
 
 if __name__ == "__main__":

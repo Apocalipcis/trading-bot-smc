@@ -1,292 +1,697 @@
-<!-- Pairs Management Table -->
-<div class="table-responsive">
-    <table class="table table-hover mb-0">
-        <thead class="table-dark">
-            <tr>
-                <th>Symbol</th>
-                <th>Live Trading</th>
-                <th>Backtest</th>
-                <th>Status</th>
-                <th>Price</th>
-                <th>Bias</th>
-                <th>Signals</th>
-                <th>Actions <small class="text-muted">(⚡=Test, 📊=Run, 🔄=Toggle)</small></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for pair in config.pairs %}
-            {% set status = pair_statuses.get(pair.symbol) %}
-            <tr class="pair-row" data-symbol="{{ pair.symbol }}">
-                <td>
-                    <strong>{{ pair.symbol }}</strong>
-                    <br>
-                    <small class="text-muted">{{ pair.timeframe }} • {{ pair.strategy }}</small>
-                </td>
-                
-                <!-- Live Trading Toggle -->
-                <td>
-                    <label class="toggle-switch">
-                        <input type="checkbox" 
-                               {% if pair.enabled %}checked{% endif %}
-                               {% if is_running %}disabled{% endif %}
-                               hx-post="/api/pairs/{{ pair.symbol }}/toggle-enabled"
-                               hx-vals='{"enabled": {% if pair.enabled %}false{% else %}true{% endif %}}'
-                               hx-target="#status-alert"
-                               hx-swap="innerHTML">
-                        <span class="slider"></span>
-                    </label>
-                    {% if pair.enabled %}
-                        <small class="text-success d-block">Enabled</small>
-                    {% else %}
-                        <small class="text-muted d-block">Disabled</small>
-                    {% endif %}
-                </td>
-                
-                <!-- Backtest Status -->
-                <td>
-                    {% if status and status.backtest_running %}
-                        <span class="badge bg-warning">
-                            <i class="bi bi-graph-up"></i> Running
-                        </span>
-                    {% elif pair.backtest_enabled %}
-                        <span class="badge bg-info">
-                            <i class="bi bi-graph-up"></i> Enabled
-                        </span>
-                    {% else %}
-                        <span class="text-muted">Disabled</span>
-                    {% endif %}
-                </td>
-                
-                <!-- Status -->
-                <td>
-                    {% if status %}
-                        <span class="status-indicator status-{{ status.status }}"></span>
-                        <span class="badge bg-{{ 'success' if status.status == 'running' else 'warning' if status.status == 'starting' else 'secondary' }}">
-                            {{ status.status.title() }}
-                        </span>
-                        {% if status.backtest_running %}
-                            <br><small class="text-info"><i class="bi bi-graph-up"></i> Backtesting...</small>
-                        {% endif %}
-                        {% if status.websocket_connected %}
-                            <br><small class="text-success"><i class="bi bi-wifi"></i> Connected</small>
-                        {% endif %}
-                    {% else %}
-                        <span class="status-indicator status-stopped"></span>
-                        <span class="badge bg-secondary">Stopped</span>
-                    {% endif %}
-                </td>
-                
-                <!-- Current Price -->
-                <td>
-                    {% if status and status.current_price %}
-                        <strong>${{ "%.2f"|format(status.current_price) }}</strong>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                
-                <!-- HTF Bias -->
-                <td>
-                    {% if status and status.htf_bias %}
-                        {% set bias_color = 'success' if status.htf_bias == 'bull' else 'danger' if status.htf_bias == 'bear' else 'secondary' %}
-                        <span class="badge bg-{{ bias_color }}">
-                            {% if status.htf_bias == 'bull' %}
-                                <i class="bi bi-arrow-up"></i> Bull
-                            {% elif status.htf_bias == 'bear' %}
-                                <i class="bi bi-arrow-down"></i> Bear
-                            {% else %}
-                                <i class="bi bi-dash"></i> Neutral
-                            {% endif %}
-                        </span>
-                    {% else %}
-                        <span class="badge bg-secondary">
-                            <i class="bi bi-dash"></i> Neutral
-                        </span>
-                    {% endif %}
-                </td>
-                
-                <!-- Active Signals -->
-                <td>
-                    {% if status and status.active_signals > 0 %}
-                        <span class="badge bg-primary">{{ status.active_signals }}</span>
-                        {% if status.last_signal_time and status.last_signal_time is string %}
-                            <br><small class="text-muted">{{ status.last_signal_time[:16] }}</small>
-                        {% endif %}
-                    {% else %}
-                        <span class="text-muted">0</span>
-                    {% endif %}
-                </td>
-                
-                <!-- Actions -->
-                <td>
-                    <div class="btn-group btn-group-sm">
-                        <!-- Test Signal button -->
-                        <button class="btn btn-outline-info btn-sm" 
-                                hx-post="/api/pairs/{{ pair.symbol }}/test-signal"
-                                hx-target="#status-alert"
-                                hx-swap="innerHTML"
-                                hx-indicator="#test-signal-spinner-{{ pair.symbol }}"
-                                title="Generate test signal">
-                            <span id="test-signal-spinner-{{ pair.symbol }}" class="spinner-border spinner-border-sm d-none me-1"></span>
-                            <i class="bi bi-lightning"></i>
-                        </button>
-                        
-                        <!-- Run Backtest button -->
-                        <button class="btn btn-outline-success btn-sm" 
-                                hx-post="/api/pairs/{{ pair.symbol }}/run-backtest"
-                                hx-target="#status-alert"
-                                hx-swap="innerHTML"
-                                hx-indicator="#backtest-spinner-{{ pair.symbol }}"
-                                {% if status and status.backtest_running %}disabled{% endif %}
-                                title="Run backtest for {{ pair.symbol }}">
-                            <span id="backtest-spinner-{{ pair.symbol }}" class="spinner-border spinner-border-sm d-none me-1"></span>
-                            <i class="bi bi-graph-up"></i>
-                        </button>
-                        
-                        <!-- Toggle Backtest Status button -->
-                        <button class="btn btn-{{ 'success' if pair.backtest_enabled else 'secondary' }} btn-sm" 
-                                hx-post="/api/pairs/{{ pair.symbol }}/toggle-backtest-status"
-                                hx-target="#status-alert"
-                                hx-swap="innerHTML"
-                                title="{{ 'Disable' if pair.backtest_enabled else 'Enable' }} backtest for {{ pair.symbol }}">
-                            <i class="bi bi-toggle-{{ 'on' if pair.backtest_enabled else 'off' }}"></i>
-                        </button>
-                        
-                        <!-- Remove button -->
-                        <button class="btn btn-outline-danger btn-sm" 
-                                onclick="removePairWithConfirmation('{{ pair.symbol }}')"
-                                title="Remove pair">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                        
-                        <!-- Settings button -->
-                        <button class="btn btn-outline-secondary btn-sm" 
-                                title="Pair settings">
-                            <i class="bi bi-gear"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-            
-            {% if config.pairs|length == 0 %}
-            <tr>
-                <td colspan="8" class="text-center text-muted py-4">
-                    <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                    No trading pairs configured. Click "Add Pair" to get started.
-                </td>
-            </tr>
-            {% endif %}
-        </tbody>
-    </table>
-</div>
-
-{% if config.pairs|length > 0 %}
-<div class="card-footer text-muted">
-    <div class="row">
-        <div class="col-md-6">
-            <small>
-                <i class="bi bi-info-circle"></i>
-                {{ config.pairs|length }} total pairs • Max concurrent: {{ config.max_concurrent_pairs }}
-            </small>
-        </div>
-        <div class="col-md-6 text-end">
-            <small>
-                <i class="bi bi-clock"></i>
-                Last updated: {{ moment().format('HH:mm:ss') if moment else 'now' }}
-            </small>
-        </div>
-    </div>
-</div>
-{% endif %}
-
-<script>
-// Enhanced UI management for pairs table
-document.addEventListener('DOMContentLoaded', function() {
-    // Auto-hide alerts after 5 seconds
-    const alerts = document.querySelectorAll('.alert');
-    alerts.forEach(alert => {
-        setTimeout(() => {
-            if (alert && alert.parentNode) {
-                alert.style.transition = 'opacity 0.5s ease';
-                alert.style.opacity = '0';
-                setTimeout(() => alert.remove(), 500);
-            }
-        }, 5000);
-    });
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMC Trading Bot - Pairs Management</title>
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .status-running { background-color: #28a745; }
+        .status-starting { background-color: #ffc107; }
+        .status-stopped { background-color: #6c757d; }
+        .status-error { background-color: #dc3545; }
+        .status-queued { background-color: #17a2b8; }
+        
+        .pair-card {
+            transition: all 0.2s ease;
+            border: 1px solid #dee2e6;
+        }
+        .pair-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #007bff;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .pair-row {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+        
+        .pair-row.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .pair-row.removing {
+            opacity: 0;
+            transform: translateX(-100%);
+            transition: all 0.3s ease;
+        }
+        
+        .alert {
+            transition: opacity 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+    <!-- Status Alert -->
+    <div id="status-alert"></div>
     
-    // Add smooth transitions for new rows
-    const newRows = document.querySelectorAll('.pair-row');
-    newRows.forEach(row => {
-        row.classList.add('adding');
-        setTimeout(() => row.classList.add('show'), 100);
-    });
-});
-
-// Function to refresh pairs table
-function refreshPairsTable() {
-    htmx.ajax('GET', '/pairs-table', {
-        target: '#pairs-table',
-        swap: 'outerHTML'
-    });
-}
-
-// Function to remove pair row with animation
-function removePairRow(symbol) {
-    const row = document.querySelector(`tr[data-symbol="${symbol}"]`);
-    if (row) {
-        row.classList.add('removing');
-        setTimeout(() => {
-            row.remove();
-            // Check if table is empty and show message
-            const tbody = document.querySelector('tbody');
-            if (tbody.children.length === 0) {
-                location.reload();
-            }
-        }, 300);
-    }
-}
-
-// Function to remove pair with confirmation and API call
-async function removePairWithConfirmation(symbol) {
-    if (confirm(`Are you sure you want to remove ${symbol}?`)) {
-        try {
-            const response = await fetch(`/api/pairs/${symbol}`, {
-                method: 'DELETE'
+    <div class="container-fluid mt-4">
+        <!-- Pairs Management Table -->
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Live Trading</th>
+                        <th>Backtest</th>
+                        <th>Status</th>
+                        <th>Price</th>
+                        <th>Bias</th>
+                        <th>Signals</th>
+                        <th>Actions <small class="text-muted">(⚡=Test, 📊=Quick, ⚙️=Custom, 🔄=Toggle)</small></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pair in config.pairs %}
+                    {% set status = pair_statuses.get(pair.symbol) %}
+                    <tr class="pair-row" data-symbol="{{ pair.symbol }}">
+                        <td>
+                            <strong>{{ pair.symbol }}</strong>
+                            <br>
+                            <small class="text-muted">{{ pair.timeframe }} • {{ pair.strategy }}</small>
+                        </td>
+                        
+                        <!-- Live Trading Toggle -->
+                        <td>
+                            <label class="toggle-switch">
+                                <input type="checkbox" 
+                                       {% if pair.enabled %}checked{% endif %}
+                                       {% if is_running %}disabled{% endif %}
+                                       hx-post="/api/pairs/{{ pair.symbol }}/toggle-enabled"
+                                       hx-vals='{"enabled": {% if pair.enabled %}false{% else %}true{% endif %}}'
+                                       hx-target="#status-alert"
+                                       hx-swap="innerHTML">
+                                <span class="slider"></span>
+                            </label>
+                            {% if pair.enabled %}
+                                <small class="text-success d-block">Enabled</small>
+                            {% else %}
+                                <small class="text-muted d-block">Disabled</small>
+                            {% endif %}
+                        </td>
+                        
+                        <!-- Backtest Status -->
+                        <td>
+                            {% if status and status.backtest_running %}
+                                <span class="badge bg-warning">
+                                    <i class="bi bi-graph-up"></i> Running
+                                </span>
+                            {% elif pair.backtest_enabled %}
+                                <span class="badge bg-info">
+                                    <i class="bi bi-graph-up"></i> Enabled
+                                </span>
+                            {% else %}
+                                <span class="text-muted">Disabled</span>
+                            {% endif %}
+                        </td>
+                        
+                        <!-- Status -->
+                        <td>
+                            {% if status %}
+                                <span class="status-indicator status-{{ status.status }}"></span>
+                                <span class="badge bg-{{ 'success' if status.status == 'running' else 'warning' if status.status == 'starting' else 'secondary' }}">
+                                    {{ status.status.title() }}
+                                </span>
+                                {% if status.backtest_running %}
+                                    <br><small class="text-info"><i class="bi bi-graph-up"></i> Backtesting...</small>
+                                {% endif %}
+                                {% if status.websocket_connected %}
+                                    <br><small class="text-success"><i class="bi bi-wifi"></i> Connected</small>
+                                {% endif %}
+                            {% else %}
+                                <span class="status-indicator status-stopped"></span>
+                                <span class="badge bg-secondary">Stopped</span>
+                            {% endif %}
+                        </td>
+                        
+                        <!-- Current Price -->
+                        <td>
+                            {% if status and status.current_price %}
+                                <strong>${{ "%.2f"|format(status.current_price) }}</strong>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        
+                        <!-- HTF Bias -->
+                        <td>
+                            {% if status and status.htf_bias %}
+                                {% set bias_color = 'success' if status.htf_bias == 'bull' else 'danger' if status.htf_bias == 'bear' else 'secondary' %}
+                                <span class="badge bg-{{ bias_color }}">
+                                    {% if status.htf_bias == 'bull' %}
+                                        <i class="bi bi-arrow-up"></i> Bull
+                                    {% elif status.htf_bias == 'bear' %}
+                                        <i class="bi bi-arrow-down"></i> Bear
+                                    {% else %}
+                                        <i class="bi bi-dash"></i> Neutral
+                                    {% endif %}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary">
+                                    <i class="bi bi-dash"></i> Neutral
+                                </span>
+                            {% endif %}
+                        </td>
+                        
+                        <!-- Active Signals -->
+                        <td>
+                            {% if status and status.active_signals > 0 %}
+                                <span class="badge bg-primary">{{ status.active_signals }}</span>
+                                {% if status.last_signal_time and status.last_signal_time is string %}
+                                    <br><small class="text-muted">{{ status.last_signal_time[:16] }}</small>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">0</span>
+                            {% endif %}
+                        </td>
+                        
+                        <!-- Actions -->
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <!-- Test Signal button -->
+                                <button class="btn btn-outline-info btn-sm" 
+                                        hx-post="/api/pairs/{{ pair.symbol }}/test-signal"
+                                        hx-target="#status-alert"
+                                        hx-swap="innerHTML"
+                                        hx-indicator="#test-signal-spinner-{{ pair.symbol }}"
+                                        title="Generate test signal">
+                                    <span id="test-signal-spinner-{{ pair.symbol }}" class="spinner-border spinner-border-sm d-none me-1"></span>
+                                    <i class="bi bi-lightning"></i>
+                                </button>
+                                
+                                <!-- Auto Backtest button (Fetch Data + CSV Backtest) -->
+                                <button class="btn btn-outline-success btn-sm" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#autoBacktestModal"
+                                        data-symbol="{{ pair.symbol }}"
+                                        data-config="{{ {'rr_min': pair.min_risk_reward, 'fractal_left': pair.fractal_left, 'fractal_right': pair.fractal_right, 'timeframe': pair.timeframe} | tojson }}"
+                                        {% if status and status.backtest_running %}disabled{% endif %}
+                                        title="Auto backtest for {{ pair.symbol }}: Fetch Data + Run CSV Backtest">
+                                    <span id="backtest-spinner-{{ pair.symbol }}" class="spinner-border spinner-border-sm d-none me-1"></span>
+                                    <i class="bi bi-arrow-repeat"></i>
+                                </button>
+                                
+                                <!-- Custom Backtest button -->
+                                <button class="btn btn-outline-info btn-sm" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#backtestParamsModal"
+                                        data-symbol="{{ pair.symbol }}"
+                                        data-config="{{ {'rr_min': pair.min_risk_reward, 'fractal_left': pair.fractal_left, 'fractal_right': pair.fractal_right, 'timeframe': pair.timeframe} | tojson }}"
+                                        {% if status and status.backtest_running %}disabled{% endif %}
+                                        title="Run backtest for {{ pair.symbol }} with custom parameters">
+                                    <i class="bi bi-gear"></i>
+                                </button>
+                                
+                                <!-- Toggle Backtest Status button -->
+                                <button class="btn btn-{{ 'success' if pair.backtest_enabled else 'secondary' }} btn-sm" 
+                                        hx-post="/api/pairs/{{ pair.symbol }}/toggle-backtest-status"
+                                        hx-target="#status-alert"
+                                        hx-swap="innerHTML"
+                                        title="{{ 'Disable' if pair.backtest_enabled else 'Enable' }} backtest for {{ pair.symbol }}">
+                                    <i class="bi bi-toggle-{{ 'on' if pair.backtest_enabled else 'off' }}"></i>
+                                </button>
+                                
+                                <!-- Remove button -->
+                                <button class="btn btn-outline-danger btn-sm" 
+                                        onclick="removePairWithConfirmation('{{ pair.symbol }}')"
+                                        title="Remove pair">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                                
+                                <!-- Settings button -->
+                                <button class="btn btn-outline-secondary btn-sm" 
+                                        title="Pair settings">
+                                    <i class="bi bi-gear"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    
+                    {% if config.pairs|length == 0 %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            No trading pairs configured. Click "Add Pair" to get started.
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        
+        {% if config.pairs|length > 0 %}
+        <div class="card-footer text-muted">
+            <div class="row">
+                <div class="col-md-6">
+                    <small>
+                        <i class="bi bi-info-circle"></i>
+                        {{ config.pairs|length }} total pairs • Max concurrent: {{ config.max_concurrent_pairs }}
+                    </small>
+                </div>
+                <div class="col-md-6 text-end">
+                    <small>
+                        <i class="bi bi-clock"></i>
+                        Last updated: {{ moment().format('HH:mm:ss') if moment else 'now' }}
+                    </small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Backtest Parameters Modal -->
+        <div class="modal fade" id="backtestParamsModal" tabindex="-1" aria-labelledby="backtestParamsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="backtestParamsModalLabel">
+                            <i class="bi bi-gear"></i> Налаштування бектесту для <span id="modal-symbol"></span>
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <form id="backtestParamsForm" hx-post="" hx-target="#status-alert" hx-swap="innerHTML">
+                        <div class="modal-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="ltf_timeframe" class="form-label">Низький часовий фрейм</label>
+                                        <select class="form-select" id="ltf_timeframe" name="ltf_timeframe" required>
+                                            <option value="1m">1m</option>
+                                            <option value="5m">5m</option>
+                                            <option value="15m" selected>15m</option>
+                                            <option value="30m">30m</option>
+                                            <option value="1h">1h</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="htf_timeframe" class="form-label">Високий часовий фрейм</label>
+                                        <select class="form-select" id="htf_timeframe" name="htf_timeframe" required>
+                                            <option value="1h">1h</option>
+                                            <option value="4h" selected>4h</option>
+                                            <option value="1d">1d</option>
+                                            <option value="1w">1w</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="days_back" class="form-label">Кількість днів назад</label>
+                                        <input type="number" class="form-control" id="days_back" name="days_back" 
+                                               value="30" min="7" max="365" required>
+                                        <div class="form-text">Від 7 до 365 днів</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="rr_min" class="form-label">Мінімальне RR</label>
+                                        <input type="number" class="form-control" id="rr_min" name="rr_min" 
+                                               value="3.0" step="0.1" min="1.0" required>
+                                        <div class="form-text">Мінімальне співвідношення ризик/прибуток</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="fractal_left" class="form-label">Fractal Left</label>
+                                        <input type="number" class="form-control" id="fractal_left" name="fractal_left" 
+                                               value="2" min="1" max="10" required>
+                                        <div class="form-text">Кількість свічок зліва від фракталу</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="fractal_right" class="form-label">Fractal Right</label>
+                                        <input type="number" class="form-control" id="fractal_right" name="fractal_right" 
+                                               value="2" min="1" max="10" required>
+                                        <div class="form-text">Кількість свічок справа від фракталу</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="mb-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="require_fvg" name="require_fvg">
+                                            <label class="form-check-label" for="require_fvg">
+                                                <strong>Require FVG confluence</strong>
+                                            </label>
+                                            <div class="form-text">Вимагати наявності Fair Value Gap для підтвердження сигналу</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                <i class="bi bi-x-circle"></i> Скасувати
+                            </button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-play-circle"></i> Запустити бектест
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Auto Backtest Modal -->
+        <div class="modal fade" id="autoBacktestModal" tabindex="-1" aria-labelledby="autoBacktestModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="autoBacktestModalLabel">
+                            <i class="bi bi-arrow-repeat"></i> Auto Backtest для <span id="auto-modal-symbol"></span>
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <form id="autoBacktestForm" hx-post="" hx-target="#status-alert" hx-swap="innerHTML">
+                        <div class="modal-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i>
+                                <strong>Auto Backtest</strong> автоматично виконає:
+                                <br>1. <strong>Fetch Data</strong> - завантаження історичних даних з Binance
+                                <br>2. <strong>Run CSV Backtest</strong> - виконання бектесту на завантажених даних
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="auto-ltf_timeframe" class="form-label">Низький часовий фрейм</label>
+                                        <select class="form-select" id="auto-ltf_timeframe" name="ltf_timeframe" required>
+                                            <option value="1m">1m</option>
+                                            <option value="5m">5m</option>
+                                            <option value="15m" selected>15m</option>
+                                            <option value="30m">30m</option>
+                                            <option value="1h">1h</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="auto-htf_timeframe" class="form-label">Високий часовий фрейм</label>
+                                        <select class="form-select" id="auto-htf_timeframe" name="htf_timeframe" required>
+                                            <option value="1h">1h</option>
+                                            <option value="4h" selected>4h</option>
+                                            <option value="1d">1d</option>
+                                            <option value="1w">1w</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="auto-days" class="form-label">Кількість днів назад</label>
+                                        <input type="number" class="form-control" id="auto-days" name="days" 
+                                               value="30" min="7" max="365" required>
+                                        <div class="form-text">Від 7 до 365 днів</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="auto-rr_min" class="form-label">Мінімальне RR</label>
+                                        <input type="number" class="form-control" id="auto-rr_min" name="rr_min" 
+                                               value="3.0" step="0.1" min="1.0" required>
+                                        <div class="form-text">Мінімальне співвідношення ризик/прибуток</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="auto-fractal_left" class="form-label">Fractal Left</label>
+                                        <input type="number" class="form-control" id="auto-fractal_left" name="fractal_left" 
+                                               value="2" min="1" max="10" required>
+                                        <div class="form-text">Кількість свічок зліва від фракталу</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="auto-fractal_right" class="form-label">Fractal Right</label>
+                                        <input type="number" class="form-control" id="auto-fractal_right" name="fractal_right" 
+                                               value="2" min="1" max="10" required>
+                                        <div class="form-text">Кількість свічок справа від фракталу</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="mb-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="auto-require_fvg" name="require_fvg">
+                                            <label class="form-check-label" for="auto-require_fvg">
+                                                <strong>Require FVG confluence</strong>
+                                            </label>
+                                            <div class="form-text">Вимагати наявності Fair Value Gap для підтвердження сигналу</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Скасувати</button>
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-arrow-repeat"></i> Запустити Auto Backtest
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+        // Enhanced UI management for pairs table
+        document.addEventListener('DOMContentLoaded', function() {
+            // Auto-hide alerts after 5 seconds
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(alert => {
+                setTimeout(() => {
+                    if (alert && alert.parentNode) {
+                        alert.style.transition = 'opacity 0.5s ease';
+                        alert.style.opacity = '0';
+                        setTimeout(() => alert.remove(), 500);
+                    }
+                }, 5000);
             });
             
-            if (response.ok) {
-                // Show success message
-                const statusAlert = document.getElementById('status-alert');
-                if (statusAlert) {
-                    statusAlert.innerHTML = `
-                        <div class="alert alert-success alert-dismissible fade show" role="alert">
-                            <i class="bi bi-check-circle"></i>
-                            <strong>Success!</strong> Removed pair ${symbol}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    `;
-                }
-                
-                // Remove row with animation
-                removePairRow(symbol);
-            } else {
-                throw new Error('Failed to remove pair');
+            // Add smooth transitions for new rows
+            const newRows = document.querySelectorAll('.pair-row');
+            newRows.forEach(row => {
+                row.classList.add('adding');
+                setTimeout(() => row.classList.add('show'), 100);
+            });
+            
+            // Initialize backtest parameters modal
+            const backtestParamsModal = document.getElementById('backtestParamsModal');
+            if (backtestParamsModal) {
+                backtestParamsModal.addEventListener('show.bs.modal', function (event) {
+                    const button = event.relatedTarget;
+                    const symbol = button.getAttribute('data-symbol');
+                    const pairConfig = button.getAttribute('data-config');
+                    
+                    // Set modal title
+                    document.getElementById('modal-symbol').textContent = symbol;
+                    
+                    // Set form action
+                    document.getElementById('backtestParamsForm').setAttribute('hx-post', `/api/pairs/${symbol}/run-backtest-with-params`);
+                    
+                    // Parse pair config if available
+                    if (pairConfig) {
+                        try {
+                            const config = JSON.parse(pairConfig);
+                            if (config.rr_min) document.getElementById('rr_min').value = config.rr_min;
+                            if (config.fractal_left) document.getElementById('fractal_left').value = config.fractal_left;
+                            if (config.fractal_right) document.getElementById('fractal_right').value = config.fractal_right;
+                            if (config.timeframe) document.getElementById('ltf_timeframe').value = config.timeframe;
+                        } catch (e) {
+                            console.warn('Failed to parse pair config:', e);
+                        }
+                    }
+                });
             }
-        } catch (error) {
-            console.error('Error removing pair:', error);
-            // Show error message
-            const statusAlert = document.getElementById('status-alert');
-            if (statusAlert) {
-                statusAlert.innerHTML = `
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        <i class="bi bi-exclamation-triangle"></i>
-                        <strong>Error!</strong> Failed to remove pair ${symbol}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                `;
+        });
+        
+        // Function to refresh pairs table
+        function refreshPairsTable() {
+            htmx.ajax('GET', '/pairs-table', {
+                target: '#pairs-table',
+                swap: 'outerHTML'
+            });
+        }
+        
+        // Function to remove pair row with animation
+        function removePairRow(symbol) {
+            const row = document.querySelector(`tr[data-symbol="${symbol}"]`);
+            if (row) {
+                row.classList.add('removing');
+                setTimeout(() => {
+                    row.remove();
+                    // Check if table is empty and show message
+                    const tbody = document.querySelector('tbody');
+                    if (tbody.children.length === 0) {
+                        location.reload();
+                    }
+                }, 300);
             }
         }
-    }
-}
-</script>
+        
+        // Function to remove pair with confirmation and API call
+        async function removePairWithConfirmation(symbol) {
+            if (confirm(`Are you sure you want to remove ${symbol}?`)) {
+                try {
+                    const response = await fetch(`/api/pairs/${symbol}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        // Show success message
+                        const statusAlert = document.getElementById('status-alert');
+                        if (statusAlert) {
+                            statusAlert.innerHTML = `
+                                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                                    <i class="bi bi-check-circle"></i>
+                                    <strong>Success!</strong> Removed pair ${symbol}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                </div>
+                            `;
+                        }
+                        
+                        // Remove row with animation
+                        removePairRow(symbol);
+                    } else {
+                        throw new Error('Failed to remove pair');
+                    }
+                } catch (error) {
+                    console.error('Error removing pair:', error);
+                    // Show error message
+                    const statusAlert = document.getElementById('status-alert');
+                    if (statusAlert) {
+                        statusAlert.innerHTML = `
+                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                <strong>Error!</strong> Failed to remove pair ${symbol}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        `;
+                    }
+                }
+            }
+        }
+        
+        // Initialize auto backtest modal
+        const autoBacktestModal = document.getElementById('autoBacktestModal');
+        if (autoBacktestModal) {
+            autoBacktestModal.addEventListener('show.bs.modal', function (event) {
+                const button = event.relatedTarget;
+                const symbol = button.getAttribute('data-symbol');
+                const pairConfig = button.getAttribute('data-config');
+                
+                console.log('Opening modal for symbol:', symbol); // Debug log
+                
+                // Set modal title
+                const symbolSpan = document.getElementById('auto-modal-symbol');
+                if (symbolSpan) {
+                    symbolSpan.textContent = symbol;
+                }
+                
+                // Set form action
+                const form = document.getElementById('autoBacktestForm');
+                if (form) {
+                    const formAction = `/api/pairs/${symbol}/run-backtest-auto`;
+                    form.setAttribute('hx-post', formAction);
+                    console.log('Set form action to:', formAction); // Debug log
+                }
+                
+                // Parse pair config if available
+                if (pairConfig) {
+                    try {
+                        const config = JSON.parse(pairConfig);
+                        if (config.rr_min) document.getElementById('auto-rr_min').value = config.rr_min;
+                        if (config.fractal_left) document.getElementById('auto-fractal_left').value = config.fractal_left;
+                        if (config.fractal_right) document.getElementById('auto-fractal_right').value = config.fractal_right;
+                        if (config.timeframe) document.getElementById('auto-ltf_timeframe').value = config.timeframe;
+                    } catch (e) {
+                        console.warn('Failed to parse pair config:', e);
+                    }
+                }
+            });
+        }
+        
+        // Add form submit handler for debugging
+        const form = document.getElementById('autoBacktestForm');
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                console.log('Form submitted to:', this.getAttribute('hx-post'));
+                console.log('Form data:', new FormData(this));
+            });
+        }
+        </script>
+        
+        <!-- Bootstrap JavaScript -->
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    </div>
+</body>
+</html>
