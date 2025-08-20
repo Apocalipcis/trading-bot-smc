@@ -132,6 +132,7 @@ function deleteBacktestResults(symbol) {
 }
 
 function viewBacktestResults(symbol) {
+    console.log(`Loading backtest results for ${symbol}`);
     fetch(`/api/backtests/results/${symbol}`)
         .then(response => response.text())
         .then(html => {
@@ -139,13 +140,48 @@ function viewBacktestResults(symbol) {
             document.body.insertAdjacentHTML('beforeend', html);
             
             // Wait for DOM to be ready and then show modal
-                setTimeout(() => {
+            setTimeout(() => {
                 const modalElement = document.getElementById('resultsModal');
                 if (modalElement) {
+                    console.log('Modal element found, showing...');
                     // Check if Bootstrap is available
                     if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
                         const modal = new bootstrap.Modal(modalElement);
+                        
+                        // Додаємо обробник для закриття модального вікна
+                        modalElement.addEventListener('hidden.bs.modal', function() {
+                            console.log('Modal hidden, cleaning up...');
+                            if (modalElement.parentNode) {
+                                modalElement.parentNode.removeChild(modalElement);
+                            }
+                        });
+                        
                         modal.show();
+                        
+                        // Ініціалізуємо сортування після показу модального вікна
+                        setTimeout(() => {
+                            console.log('Initializing sorting for Bootstrap modal...');
+                            if (window.initializeModalSorting) {
+                                window.initializeModalSorting();
+                            } else {
+                                console.warn('initializeModalSorting function not found');
+                            }
+                            
+                            // Додаємо обробник для кліків по заголовках таблиці в модальному вікні
+                            const modalTable = modalElement.querySelector('#signalsTable');
+                            if (modalTable) {
+                                modalTable.addEventListener('click', function(e) {
+                                    if (e.target.matches('th[data-sort]')) {
+                                        const column = e.target.getAttribute('data-sort');
+                                        const currentDirection = e.target.getAttribute('data-direction') || 'desc';
+                                        const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                                        
+                                        e.target.setAttribute('data-direction', newDirection);
+                                        window.sortTable(column, newDirection);
+                                    }
+                                });
+                            }
+                        }, 500);
                     } else {
                         // Fallback: show modal manually
                         modalElement.style.display = 'block';
@@ -172,6 +208,35 @@ function viewBacktestResults(symbol) {
                                 }
                             };
                         }
+                        
+                        // Ініціалізуємо сортування для fallback випадку
+                        setTimeout(() => {
+                            if (window.initializeModalSorting) {
+                                window.initializeModalSorting();
+                            }
+                            
+                            // Додаємо обробник для кліків по заголовках таблиці в модальному вікні (fallback)
+                            const modalTable = modalElement.querySelector('#signalsTable');
+                            if (modalTable) {
+                                modalTable.addEventListener('click', function(e) {
+                                    if (e.target.matches('th[data-sort]')) {
+                                        const column = e.target.getAttribute('data-sort');
+                                        const currentDirection = e.target.getAttribute('data-direction') || 'desc';
+                                        const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                                        
+                                        e.target.setAttribute('data-direction', newDirection);
+                                        window.sortTable(column, newDirection);
+                                    }
+                                });
+                            }
+                        }, 200);
+                        
+                        // Додаємо обробник для закриття модального вікна
+                        modalElement.addEventListener('hidden.bs.modal', function() {
+                            if (modalElement.parentNode) {
+                                modalElement.parentNode.removeChild(modalElement);
+                            }
+                        });
                     }
                 } else {
                     console.error('Modal element not found');
@@ -182,5 +247,187 @@ function viewBacktestResults(symbol) {
             console.error('Error:', error);
             alert('Failed to load backtest results');
         });
+}
+
+// Глобальні функції для сортування таблиці (доступні для модального вікна)
+window.sortTable = function(column, direction) {
+    console.log(`=== Starting sortTable function ===`);
+    console.log(`Column: ${column}, Direction: ${direction}`);
+    
+    const table = document.getElementById('signalsTable');
+    if (!table) {
+        console.error('Signals table not found!');
+        return;
+    }
+    
+    console.log('Table found:', table);
+    
+    const tbody = table.querySelector('tbody');
+    if (!tbody) {
+        console.error('Table body not found!');
+        return;
+    }
+    
+    console.log('Table body found:', tbody);
+    
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    if (rows.length === 0) {
+        console.warn('No rows to sort');
+        return;
+    }
+    
+    console.log(`Found ${rows.length} rows to sort`);
+    
+    // Оновлюємо іконки сортування
+    const headers = table.querySelectorAll('th[data-sort]');
+    headers.forEach(header => {
+        const icon = header.querySelector('i');
+        if (icon) {
+            icon.className = 'bi bi-sort';
+        }
+        header.setAttribute('data-direction', 'asc');
+    });
+    
+    const currentHeader = table.querySelector(`th[data-sort="${column}"]`);
+    if (currentHeader) {
+        const icon = currentHeader.querySelector('i');
+        if (icon) {
+            icon.className = direction === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+        }
+        currentHeader.setAttribute('data-direction', direction);
+    }
+    
+    // Отримуємо індекс колонки
+    const columnIndex = window.getColumnIndex(column);
+    console.log(`Column index for ${column}: ${columnIndex}`);
+    
+    // Додаткова перевірка структури таблиці
+    if (rows.length > 0) {
+        const firstRow = rows[0];
+        const cells = firstRow.querySelectorAll('td');
+        console.log(`Table has ${cells.length} columns`);
+        console.log('Column headers:', Array.from(table.querySelectorAll('th[data-sort]')).map(th => th.getAttribute('data-sort')));
+    }
+    
+    // Сортуємо рядки
+    rows.sort((a, b) => {
+        const aCell = a.querySelector(`td:nth-child(${columnIndex})`);
+        const bCell = b.querySelector(`td:nth-child(${columnIndex})`);
+        
+        if (!aCell || !bCell) {
+            console.warn(`Cell not found for column ${column} at index ${columnIndex}`);
+            return 0;
+        }
+        
+        let aValue = aCell.textContent.trim();
+        let bValue = bCell.textContent.trim();
+        
+        console.log(`Comparing values: "${aValue}" vs "${bValue}" for column ${column}`);
+        
+        // Спеціальна обробка для різних типів даних
+        if (column === 'timestamp' || column === 'exit_time') {
+            // Сортування за часом
+            if (aValue === 'N/A') aValue = new Date(0);
+            else if (bValue === 'N/A') bValue = new Date(0);
+            else {
+                aValue = new Date(aValue);
+                bValue = new Date(bValue);
+            }
+        } else if (column === 'pnl' || column === 'pnl_percent' || column === 'rr') {
+            // Сортування за числами
+            aValue = parseFloat(aValue.replace(/[^\d.-]/g, '')) || 0;
+            bValue = parseFloat(bValue.replace(/[^\d.-]/g, '')) || 0;
+        } else if (column === 'direction') {
+            // Сортування за напрямком (LONG перед SHORT)
+            aValue = aValue === 'LONG' ? 1 : 0;
+            bValue = bValue === 'LONG' ? 1 : 0;
+        } else if (column === 'exit_reason') {
+            // Сортування за причиною закриття
+            const reasonOrder = { 'TP': 1, 'SL': 2, 'NO_EXIT': 3 };
+            aValue = reasonOrder[aValue] || 4;
+            bValue = reasonOrder[bValue] || 4;
+        } else if (column === 'entry' || column === 'sl' || column === 'tp') {
+            // Сортування за цінами
+            aValue = parseFloat(aValue.replace(/[^\d.-]/g, '')) || 0;
+            bValue = parseFloat(bValue.replace(/[^\d.-]/g, '')) || 0;
+        } else if (column === 'duration_minutes') {
+            // Сортування за тривалістю
+            aValue = parseFloat(aValue.replace(/[^\d.-]/g, '')) || 0;
+            bValue = parseFloat(bValue.replace(/[^\d.-]/g, '')) || 0;
+        }
+        
+        // Перевіряємо чи значення є числами для порівняння
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+            if (direction === 'asc') {
+                return aValue - bValue;
+            } else {
+                return bValue - aValue;
+            }
+        } else if (aValue instanceof Date && bValue instanceof Date) {
+            if (direction === 'asc') {
+                return aValue - bValue;
+            } else {
+                return bValue - aValue;
+            }
+        } else {
+            // Для рядків
+            if (direction === 'asc') {
+                return aValue > bValue ? 1 : -1;
+            } else {
+                return aValue < bValue ? 1 : -1;
+            }
+        }
+    });
+    
+    // Очищаємо та додаємо відсортовані рядки
+    tbody.innerHTML = '';
+    rows.forEach(row => tbody.appendChild(row));
+    
+    console.log(`Table sorted successfully. Rows: ${rows.length}`);
+}
+
+// Функція для отримання індексу колонки
+window.getColumnIndex = function(column) {
+    console.log(`getColumnIndex called with column: ${column}`);
+    const columnMap = {
+        'timestamp': 1,
+        'direction': 2,
+        'entry': 3,
+        'sl': 4,
+        'tp': 5,
+        'exit_time': 6,
+        'exit_reason': 7,
+        'pnl': 8,
+        'pnl_percent': 9,
+        'duration_minutes': 10,
+        'rr': 11
+    };
+    const index = columnMap[column];
+    if (index === undefined) {
+        console.warn(`Unknown column: ${column}`);
+        console.log('Available columns:', Object.keys(columnMap));
+        return 1;
+    }
+    console.log(`Column ${column} mapped to index ${index}`);
+    return index;
+}
+
+// Функція для перевірки готовності таблиці
+window.isTableReady = function() {
+    const table = document.getElementById('signalsTable');
+    const tbody = table?.querySelector('tbody');
+    const rows = tbody?.querySelectorAll('tr');
+    return table && tbody && rows && rows.length > 0;
+}
+
+// Ініціалізація сортування для модального вікна
+window.initializeModalSorting = function() {
+    if (window.isTableReady()) {
+        console.log('Initializing sorting for modal signals table');
+        window.sortTable('timestamp', 'desc');
+    } else {
+        console.log('Modal table not ready, retrying in 100ms...');
+        setTimeout(window.initializeModalSorting, 100);
+    }
 }
     </script>

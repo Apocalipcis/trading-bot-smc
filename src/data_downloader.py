@@ -150,6 +150,42 @@ def download_crypto_data(symbol: str, days: int = 30) -> tuple[str, str]:
     
     return ltf_filename, htf_filename
 
+async def download_specific_timeframe(symbol: str, timeframe: str, days: int, 
+                                    end_date: Optional[datetime] = None) -> str:
+    """
+    Download data for a specific timeframe
+    
+    Args:
+        symbol: Trading pair (e.g., 'BTCUSDT')
+        timeframe: Timeframe ('1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w')
+        days: Number of days to download
+        end_date: End date (defaults to now)
+        
+    Returns:
+        Filename of the downloaded data
+    """
+    if end_date is None:
+        end_date = datetime.now()
+    
+    start_date = end_date - timedelta(days=days)
+    
+    downloader = BinanceDataDownloader()
+    
+    # Download data
+    df = downloader.download_data(
+        symbol=symbol,
+        timeframe=timeframe,
+        start_date=start_date.strftime('%Y-%m-%d'),
+        end_date=end_date.strftime('%Y-%m-%d')
+    )
+    
+    # Save to file
+    filename = f"{symbol.lower()}_{timeframe}_{days}d.csv"
+    filepath = f"data/{filename}"
+    downloader.save_to_csv(df, filepath)
+    
+    return filename
+
 if __name__ == '__main__':
     import argparse
     

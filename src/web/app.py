@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+import pandas as pd
 
 # Add project root to path
 project_root = Path(__file__).resolve().parents[2]
@@ -25,6 +26,9 @@ from src.core import LiveExchangeGateway, PairManager
 from src.pre_trade_backtest import run_symbol_backtest
 from src.data_downloader import download_crypto_data
 from src.telegram_client import TelegramClient
+from src.data_loader import prepare_data, validate_timeframe_alignment
+from src.signal_generator import generate_signals
+from src.backtester import BacktestValidator
 import os
 import glob
 from datetime import datetime, timedelta
@@ -61,7 +65,24 @@ _load_dotenv()
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+try:
+    # Create logs directory if it doesn't exist
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(logs_dir / 'app.log')
+        ]
+    )
+except Exception as e:
+    # Fallback to basic logging if file logging fails
+    print(f"Warning: Could not set up file logging: {e}")
+    logging.basicConfig(level=logging.INFO)
+    
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -766,14 +787,19 @@ async def run_single_backtest(symbol: str, request: Request):
 # New Backtest API endpoints
 @app.post("/api/backtests/fetch")
 async def fetch_backtest_data(
+    request: Request,
     symbol: str = Form(...),
-    timeframe: str = Form("15m"),
+    timeframes: List[str] = Form([]),
     days: int = Form(30),
     until: Optional[str] = Form(None)
 ):
     """Fetch historical data for backtesting"""
     try:
         symbol = symbol.upper().strip()
+        
+        # If no timeframes selected, use default
+        if not timeframes:
+            timeframes = ["15m", "4h"]
         
         # Convert days to start/end dates
         if until:
@@ -782,25 +808,57 @@ async def fetch_backtest_data(
             end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
         
-        logger.info(f"Fetching {symbol} {timeframe} data from {start_date.date()} to {end_date.date()}")
+        logger.info(f"Fetching {symbol} data for timeframes {timeframes} from {start_date.date()} to {end_date.date()}")
         
-        # Use existing data downloader
-        try:
-            ltf_file, htf_file = download_crypto_data(symbol, days)
+        # Download data for each timeframe
+        downloaded_files = []
+        errors = []
+        
+        for timeframe in timeframes:
+            try:
+                # Use the data downloader for each timeframe
+                from src.data_downloader import download_specific_timeframe
+                filename = await download_specific_timeframe(symbol, timeframe, days, end_date)
+                downloaded_files.append(f"{timeframe}: {filename}")
+                logger.info(f"Downloaded {symbol} {timeframe} data: {filename}")
+            except Exception as e:
+                error_msg = f"{timeframe}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"Failed to download {symbol} {timeframe}: {e}")
+        
+        # Prepare response
+        if downloaded_files and not errors:
+            # All successful
+            files_list = "<br>".join([f"• {f}" for f in downloaded_files])
             return HTMLResponse(f"""
                 <div class="alert alert-success alert-dismissible fade show">
                     <i class="bi bi-check-circle"></i>
-                    <strong>Success!</strong> Downloaded {symbol} data for {days} days.
-                    <br><small>Files: {ltf_file}, {htf_file}</small>
+                    <strong>Success!</strong> Downloaded {symbol} data for {len(timeframes)} timeframes ({days} days).
+                    <br><small>{files_list}</small>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             """)
-        except Exception as e:
-            logger.error(f"Data download failed: {e}")
+        elif downloaded_files and errors:
+            # Partial success
+            files_list = "<br>".join([f"✓ {f}" for f in downloaded_files])
+            errors_list = "<br>".join([f"✗ {e}" for e in errors])
+            return HTMLResponse(f"""
+                <div class="alert alert-warning alert-dismissible fade show">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Partial Success!</strong> Some downloads completed, some failed.
+                    <br><strong>Downloaded:</strong><br><small>{files_list}</small>
+                    <br><strong>Errors:</strong><br><small>{errors_list}</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            """)
+        else:
+            # All failed
+            errors_list = "<br>".join([f"• {e}" for e in errors])
             return HTMLResponse(f"""
                 <div class="alert alert-danger alert-dismissible fade show">
                     <i class="bi bi-exclamation-triangle"></i>
-                    <strong>Error!</strong> Failed to download {symbol} data: {str(e)}
+                    <strong>Error!</strong> Failed to download {symbol} data for all timeframes.
+                    <br><small>{errors_list}</small>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             """)
@@ -889,7 +947,7 @@ async def delete_backtest_results(symbol: str):
         if not backtest_dir.exists():
             raise HTTPException(status_code=404, detail=f"Backtest results for {symbol} not found")
         
-        # Remove entire directory
+        # Remove entire directory (this will delete both JSON and CSV results)
         import shutil
         shutil.rmtree(backtest_dir)
         
@@ -960,56 +1018,73 @@ async def view_backtest_results(symbol: str, request: Request):
             import json
             data = json.load(f)
         
-        # Extract report data
-        if 'report' in data:
-            report = data['report']
+        # Check if this is a CSV backtest result
+        if data.get('type') == 'csv_backtest':
+            # Find the latest CSV file and load signals data
+            symbol_dir = Path("backtest_results") / symbol
+            csv_files = list(symbol_dir.glob("csv_backtest_*.csv"))
+            
+            signals = []
+            if csv_files:
+                # Get the most recent CSV file
+                latest_csv = max(csv_files, key=lambda x: x.stat().st_mtime)
+                try:
+                    import pandas as pd
+                    signals_df = pd.read_csv(latest_csv)
+                    signals = signals_df.to_dict('records')
+                except Exception as e:
+                    logger.warning(f"Failed to load CSV data for {symbol}: {e}")
+            
+            # Prepare data for CSV backtest template
+            results = {
+                'total_signals': data.get('total_signals', 0),
+                'long_signals': data.get('long_signals', 0),
+                'short_signals': data.get('short_signals', 0),
+                'average_rr': data.get('average_rr', 0),
+                'fvg_confluence': data.get('fvg_confluence_signals', 0),
+                'timestamp': data.get('timestamp', 'N/A'),
+                'total_pnl': data.get('total_pnl', 0),
+                'winning_trades': data.get('winning_trades', 0),
+                'losing_trades': data.get('losing_trades', 0),
+                'win_rate': data.get('win_rate', 0),
+                'avg_duration_hours': data.get('avg_duration_hours', 0)
+            }
+            parameters = data.get('parameters', {})
+            
+            return templates.TemplateResponse("backtest_results_modal.html", {
+                "request": request,
+                "symbol": symbol,
+                "backtest_type": "csv_backtest",
+                "results": results,
+                "parameters": parameters,
+                "signals": signals
+            })
         else:
-            report = data
-        
-        # Format results for display
-        total_trades = report.get('total_trades', 0)
-        win_rate = report.get('win_rate', 0)
-        profit_factor = report.get('profit_factor', 0)
-        total_pnl = report.get('total_pnl', 0)
-        max_drawdown = report.get('max_drawdown', 0)
-        
-        return HTMLResponse(f"""
-            <div class="modal fade" id="resultsModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Backtest Results: {symbol}</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <h6>Performance Metrics</h6>
-                                    <ul class="list-unstyled">
-                                        <li><strong>Total Trades:</strong> {total_trades}</li>
-                                        <li><strong>Win Rate:</strong> {win_rate:.1f}%</li>
-                                        <li><strong>Profit Factor:</strong> {profit_factor:.2f}</li>
-                                        <li><strong>Total P&L:</strong> ${total_pnl:.2f}</li>
-                                        <li><strong>Max Drawdown:</strong> {max_drawdown:.2f}%</li>
-                                    </ul>
-                                </div>
-                                <div class="col-md-6">
-                                    <h6>Risk Analysis</h6>
-                                    <ul class="list-unstyled">
-                                        <li><strong>Risk Level:</strong> {report.get('risk_level', 'N/A')}</li>
-                                        <li><strong>Recommendation:</strong> {report.get('recommendation', 'N/A')}</li>
-                                        <li><strong>Last Updated:</strong> {data.get('timestamp', 'N/A')}</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        """)
+            # Handle regular backtest results
+            if 'report' in data:
+                report = data['report']
+            else:
+                report = data
+            
+            # Prepare data for regular backtest template
+            results = {
+                'total_trades': report.get('total_trades', 0),
+                'win_rate': report.get('win_rate', 0),
+                'profit_factor': report.get('profit_factor', 0),
+                'total_pnl': report.get('total_pnl', 0),
+                'max_drawdown': report.get('max_drawdown', 0),
+                'risk_level': report.get('risk_level', 'N/A'),
+                'recommendation': report.get('recommendation', 'N/A'),
+                'timestamp': data.get('timestamp', 'N/A')
+            }
+            
+            return templates.TemplateResponse("backtest_results_modal.html", {
+                "request": request,
+                "symbol": symbol,
+                "backtest_type": "regular",
+                "results": results,
+                "parameters": {}
+            })
         
     except Exception as e:
         logger.error(f"Error viewing results for {symbol}: {e}")
@@ -1043,15 +1118,29 @@ async def get_backtest_history(request: Request):
         # Get backtest results
         backtest_results = []
         if backtest_dir.exists():
+            # Look for results in symbol directories
             for symbol_dir in backtest_dir.iterdir():
                 if symbol_dir.is_dir():
                     latest_file = symbol_dir / "latest_results.json"
                     if latest_file.exists():
                         stat = latest_file.stat()
+                        try:
+                            # Read JSON to get more details
+                            with open(latest_file, 'r', encoding='utf-8') as f:
+                                import json
+                                data = json.load(f)
+                                backtest_type = data.get('type', 'unknown')
+                                total_signals = data.get('total_signals', 0)
+                        except:
+                            backtest_type = 'unknown'
+                            total_signals = 0
+                        
                         backtest_results.append({
                             'symbol': symbol_dir.name,
                             'last_run': datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                            'file_size': f"{stat.st_size / 1024:.1f} KB"
+                            'file_size': f"{stat.st_size / 1024:.1f} KB",
+                            'type': backtest_type,
+                            'total_signals': total_signals
                         })
         
         return templates.TemplateResponse("backtest_results.html", {
@@ -1183,6 +1272,342 @@ async def test_telegram():
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         """)
+
+
+@app.post("/api/backtest/csv")
+async def run_csv_backtest(
+    request: Request,
+    ltf_file: str = Form(...),
+    htf_file: str = Form(...),
+    rr_min: float = Form(3.0),
+    fractal_left: int = Form(2),
+    fractal_right: int = Form(2),
+    require_fvg: bool = Form(False)
+):
+    """Run backtest with CSV files (replaces main.py functionality)"""
+    try:
+        # Validate input files exist - look in data/ directory
+        data_dir = Path("data")
+        
+        # Check if data directory exists
+        if not data_dir.exists():
+            raise HTTPException(status_code=400, detail="Data directory not found")
+        
+        ltf_path = data_dir / ltf_file
+        htf_path = data_dir / htf_file
+        
+        # Security check: ensure files are within data directory
+        try:
+            if not ltf_path.resolve().is_relative_to(data_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid LTF file path")
+            if not htf_path.resolve().is_relative_to(data_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid HTF file path")
+        except (ValueError, RuntimeError):
+            raise HTTPException(status_code=400, detail="Invalid file path")
+        
+        if not ltf_path.exists():
+            raise HTTPException(status_code=400, detail=f"LTF file not found: {ltf_file}")
+        if not htf_path.exists():
+            raise HTTPException(status_code=400, detail=f"HTF file not found: {htf_file}")
+        
+        logger.info(f"Starting CSV backtest: LTF={ltf_file}, HTF={htf_file}")
+        logger.info(f"File paths: LTF={ltf_path}, HTF={htf_path}")
+        
+        # Load data
+        try:
+            df_ltf, df_htf = prepare_data(str(ltf_path), str(htf_path))
+            logger.info(f"Data loaded: LTF={len(df_ltf)} rows, HTF={len(df_htf)} rows")
+        except Exception as e:
+            logger.error(f"Failed to load data: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load data: {str(e)}")
+        
+        # Validate timeframe alignment
+        try:
+            if not validate_timeframe_alignment(df_ltf, df_htf):
+                logger.warning("Timeframe alignment issues detected")
+        except Exception as e:
+            logger.warning(f"Timeframe validation failed: {e}")
+        
+        # Generate signals
+        try:
+            signals = generate_signals(
+                df_ltf=df_ltf,
+                df_htf=df_htf,
+                left=fractal_left,
+                right=fractal_right,
+                rr_min=rr_min
+            )
+            logger.info(f"Signals generated: {len(signals)} total")
+        except Exception as e:
+            logger.error(f"Failed to generate signals: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to generate signals: {str(e)}")
+        
+        # Validate signals using BacktestValidator
+        try:
+            if len(signals) > 0:
+                # Initialize validator with $100 position size
+                validator = BacktestValidator(df_ltf, position_size=100.0)
+                trade_results = validator.validate_all_signals(signals)
+                report = validator.generate_report(trade_results)
+                logger.info(f"Backtest validation completed: {len(trade_results)} trades validated")
+            else:
+                trade_results = []
+                report = {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0,
+                    'total_pnl': 0,
+                    'profit_factor': 0,
+                    'avg_duration_hours': 0
+                }
+        except Exception as e:
+            logger.error(f"Failed to validate signals: {e}")
+            # Fallback to basic results if validation fails
+            trade_results = []
+            report = {
+                'total_trades': len(signals),
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'total_pnl': 0,
+                'profit_factor': 0,
+                'avg_duration_hours': 0
+            }
+        
+        # Save results
+        try:
+            # Extract symbol from filename if possible
+            symbol_from_ltf = ltf_file.replace('.csv', '').split('_')[0].upper() if '_' in ltf_file else 'UNKNOWN'
+            
+            # Create symbol directory in backtest_results
+            backtest_dir = Path("backtest_results")
+            symbol_dir = backtest_dir / symbol_from_ltf
+            symbol_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save CSV results
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_file = symbol_dir / f"csv_backtest_{timestamp}.csv"
+            signals.to_csv(csv_file, index=False)
+            
+            # Also save a summary JSON file for consistency with other backtests
+            summary_data = {
+                "timestamp": timestamp,
+                "type": "csv_backtest",
+                "symbol": symbol_from_ltf,
+                "total_signals": len(signals),
+                "long_signals": len(signals[signals['direction'] == 'LONG']) if len(signals) > 0 else 0,
+                "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
+                "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
+                "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
+                # Add P&L statistics
+                "total_pnl": float(signals['pnl'].sum()) if len(signals) > 0 else 0,
+                "winning_trades": len(signals[signals['pnl'] > 0]) if len(signals) > 0 else 0,
+                "losing_trades": len(signals[signals['pnl'] < 0]) if len(signals) > 0 else 0,
+                "win_rate": float(len(signals[signals['pnl'] > 0]) / len(signals) * 100) if len(signals) > 0 else 0,
+                "avg_duration_hours": float(signals['duration_minutes'].mean() / 60) if len(signals) > 0 else 0,
+                "parameters": {
+                    "ltf_file": ltf_file,
+                    "htf_file": htf_file,
+                    "rr_min": rr_min,
+                    "fractal_left": fractal_left,
+                    "fractal_right": fractal_right,
+                    "require_fvg": require_fvg
+                }
+            }
+            
+            # Save summary JSON
+            import json
+            summary_file = symbol_dir / "latest_results.json"
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summary_data, f, indent=2, default=str)
+            
+            logger.info(f"Results saved to: {symbol_dir}")
+            output_file = csv_file  # Use CSV file as main output for backward compatibility
+        except Exception as e:
+            logger.error(f"Failed to save results: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save results: {str(e)}")
+        
+        # Prepare response
+        result = {
+            "success": True,
+            "total_signals": len(signals),
+            "long_signals": len(signals[signals['direction'] == 'LONG']) if len(signals) > 0 else 0,
+            "short_signals": len(signals[signals['direction'] == 'SHORT']) if len(signals) > 0 else 0,
+            "average_rr": float(signals['rr'].mean()) if len(signals) > 0 else 0,
+            "fvg_confluence_signals": int(signals['fvg_confluence'].sum()) if len(signals) > 0 else 0,
+            # Add P&L statistics
+            "total_pnl": float(signals['pnl'].sum()) if len(signals) > 0 else 0,
+            "winning_trades": len(signals[signals['pnl'] > 0]) if len(signals) > 0 else 0,
+            "losing_trades": len(signals[signals['pnl'] < 0]) if len(signals) > 0 else 0,
+            "win_rate": float(len(signals[signals['pnl'] > 0]) / len(signals) * 100) if len(signals) > 0 else 0,
+            "avg_duration_hours": float(signals['duration_minutes'].mean() / 60) if len(signals) > 0 else 0,
+            "output_file": str(output_file),
+            "parameters": {
+                "ltf_file": ltf_file,
+                "htf_file": htf_file,
+                "rr_min": rr_min,
+                "fractal_left": fractal_left,
+                "fractal_right": fractal_right,
+                "require_fvg": require_fvg
+            }
+        }
+        
+        logger.info(f"CSV backtest completed: {result['total_signals']} signals generated")
+        
+        # Return HTML results using template
+        try:
+            return templates.TemplateResponse("backtest_csv_results.html", {
+                "request": request,
+                "signals": signals.to_dict('records'),
+                "trade_results": trade_results,
+                "report": report
+            })
+        except Exception as e:
+            logger.error(f"Failed to render template: {e}")
+            # Fallback to JSON if template rendering fails
+            return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"CSV backtest error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.get("/api/backtest/csv/files")
+async def get_csv_files():
+    """Get list of available CSV files in data/ directory"""
+    try:
+        data_dir = Path("data")
+        csv_files = []
+        
+        if data_dir.exists():
+            for file_path in data_dir.glob("*.csv"):
+                csv_files.append(file_path.name)
+        
+        # Sort files alphabetically
+        csv_files.sort()
+        
+        return JSONResponse(content=csv_files)
+        
+    except Exception as e:
+        logger.error(f"Error getting CSV files: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/backtest/csv/form")
+async def get_csv_backtest_form():
+    """Get HTML form for CSV backtest"""
+    return HTMLResponse("""
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-file-earmark-csv"></i> CSV Backtest</h5>
+            </div>
+            <div class="card-body">
+                <form hx-post="/api/backtest/csv" hx-target="#csv-backtest-result">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="ltf_file" class="form-label">Lower Timeframe CSV</label>
+                                <input type="text" class="form-control" id="ltf_file" name="ltf_file" 
+                                       placeholder="data/btc_15m.csv" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="htf_file" class="form-label">Higher Timeframe CSV</label>
+                                <input type="text" class="form-control" id="htf_file" name="htf_file" 
+                                       placeholder="data/btc_4h.csv" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="rr_min" class="form-label">Min Risk/Reward</label>
+                                <input type="number" class="form-control" id="rr_min" name="rr_min" 
+                                       value="3.0" step="0.1" min="1.0">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="fractal_left" class="form-label">Fractal Left</label>
+                                <input type="number" class="form-control" id="fractal_left" name="fractal_left" 
+                                       value="2" min="1">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="fractal_right" class="form-label">Fractal Right</label>
+                                <input type="number" class="form-control" id="fractal_right" name="fractal_right" 
+                                       value="2" min="1">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="require_fvg" class="form-label">Require FVG</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="require_fvg" name="require_fvg">
+                                    <label class="form-check-label" for="require_fvg">
+                                        Require FVG confluence
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-play-circle"></i> Run CSV Backtest
+                        </button>
+                    </div>
+                </form>
+                <div id="csv-backtest-result" class="mt-3"></div>
+            </div>
+        </div>
+    """)
+
+
+# Функція render_backtest_results_html видалена - тепер використовуються Jinja2 шаблони
+
+
+# Цей endpoint більше не потрібен - видалено
+
+
+@app.get("/api/backtests/csv/download/{symbol}")
+async def download_csv_file(symbol: str):
+    """Download CSV file for a symbol"""
+    try:
+        symbol = symbol.upper()
+        symbol_dir = Path("backtest_results") / symbol
+        
+        if not symbol_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Results directory for {symbol} not found")
+        
+        # Find the latest CSV file
+        csv_files = list(symbol_dir.glob("csv_backtest_*.csv"))
+        
+        if not csv_files:
+            raise HTTPException(status_code=404, detail=f"CSV file not found for {symbol}")
+        
+        # Get the most recent CSV file
+        latest_csv = max(csv_files, key=lambda x: x.stat().st_mtime)
+        
+        # Return file as response
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=str(latest_csv),
+            filename=f"{symbol}_backtest_results.csv",
+            media_type="text/csv"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading CSV for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
